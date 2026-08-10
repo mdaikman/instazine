@@ -62,7 +62,7 @@ class ContentTest extends TestCase
             'Date' => now(),
         ]);
 
-        $this->getJson('/api/content')
+        $response = $this->getJson('/api/content')
             ->assertOk()
             ->assertJsonPath('status', 'OK')
             ->assertJsonCount(5, 'content.items')
@@ -77,10 +77,70 @@ class ContentTest extends TestCase
             ->assertJsonPath('content.items.3.content-value', 'Mid text')
             ->assertJsonPath('content.items.4.content-value', 'Footer text');
 
+        $this->assertSame(
+            strlen($response->getContent()),
+            (int) $response->headers->get('Content-Length'),
+        );
+
         $this->assertDatabaseCount('Tracking', 4)
             ->assertDatabaseHas('Tracking', ['R_id' => $header->R_id])
             ->assertDatabaseHas('Tracking', ['A_id' => $article->A_id])
             ->assertDatabaseHas('Tracking', ['R_id' => $mid->R_id])
             ->assertDatabaseHas('Tracking', ['R_id' => $footer->R_id]);
+    }
+
+    public function test_content_length_is_the_json_body_length_in_bytes(): void
+    {
+        config()->set('instazine.mode', 'EXPRESS');
+        config()->set('instazine.banner', 'Édition 📰');
+        config()->set('instazine.headers', 0);
+        config()->set('instazine.articles', 0);
+        config()->set('instazine.middles', 0);
+        config()->set('instazine.footers', 0);
+
+        $response = $this->getJson('/api/content')->assertOk();
+
+        $this->assertSame(
+            strlen($response->getContent()),
+            (int) $response->headers->get('Content-Length'),
+        );
+    }
+
+    public function test_null_content_values_are_returned_as_empty_strings(): void
+    {
+        config()->set('instazine.mode', 'EXPRESS');
+        config()->set('instazine.banner', null);
+        config()->set('instazine.headers', 0);
+        config()->set('instazine.articles', 1);
+        config()->set('instazine.middles', 0);
+        config()->set('instazine.footers', 0);
+        Article::query()->create([
+            'Headline' => null,
+            'Pic' => null,
+            'Text' => null,
+            'Author' => 1,
+            'Date' => now(),
+        ]);
+
+        $this->getJson('/api/content')
+            ->assertOk()
+            ->assertJsonPath('content.items.0.content-value', '')
+            ->assertJsonPath('content.items.1.content-value.headline', '')
+            ->assertJsonPath('content.items.1.content-value.pic', '')
+            ->assertJsonPath('content.items.1.content-value.text', '');
+    }
+
+    public function test_unsupported_mode_has_an_accurate_content_length(): void
+    {
+        config()->set('instazine.mode', 'UNKNOWN');
+
+        $response = $this->getJson('/api/content')
+            ->assertStatus(501)
+            ->assertJsonPath('status', 'UNSUPPORTED_MODE');
+
+        $this->assertSame(
+            strlen($response->getContent()),
+            (int) $response->headers->get('Content-Length'),
+        );
     }
 }
