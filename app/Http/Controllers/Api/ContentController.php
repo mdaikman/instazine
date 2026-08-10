@@ -12,10 +12,14 @@ class ContentController extends Controller
 {
     public function index(): JsonResponse
     {
-        return match (config('instazine.mode')) {
+        $response = match (config('instazine.mode')) {
             'EXPRESS' => response()->json($this->expressContent()),
             default => response()->json(['status' => 'UNSUPPORTED_MODE'], 501),
         };
+
+        $response->headers->set('Content-Length', (string) strlen($response->getContent()));
+
+        return $response;
     }
 
     /**
@@ -25,7 +29,7 @@ class ContentController extends Controller
     {
         $items = [[
             'content-type' => 'banner',
-            'content-value' => config('instazine.banner'),
+            'content-value' => config('instazine.banner') ?? '',
         ]];
         $seenHeaders = [];
         $seenArticles = [];
@@ -110,7 +114,7 @@ class ContentController extends Controller
     }
 
     /**
-     * @return array{id: int, value: array{headline: string|null, pic: string|null, text: string|null}}|null
+     * @return array{id: int, value: array{headline: string, pic: string, text: string}}|null
      */
     private function randomArticle(): ?array
     {
@@ -121,9 +125,9 @@ class ContentController extends Controller
         return $article ? [
             'id' => $article->A_id,
             'value' => [
-                'headline' => $article->Headline,
-                'pic' => $article->Pic,
-                'text' => $article->Text,
+                'headline' => $article->Headline ?? '',
+                'pic' => $article->Pic ?? '',
+                'text' => $article->Text ?? '',
             ],
         ] : null;
     }
