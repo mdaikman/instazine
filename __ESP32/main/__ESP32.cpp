@@ -1,3 +1,4 @@
+#include <atomic>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
@@ -11,6 +12,7 @@
 #include "esp_crt_bundle.h"
 #include "esp_event.h"
 #include "driver/gpio.h"
+#include "driver/ledc.h"
 #include "esp_http_client.h"
 #include "esp_log.h"
 #include "esp_netif.h"
@@ -27,7 +29,9 @@ std::vector<ContentItem> Content;
 
 static const char *TAG = "wifi_client";
 static constexpr gpio_num_t ARCADE_BUTTON_PIN = GPIO_NUM_4;
+static constexpr gpio_num_t ARCADE_LED_PIN = GPIO_NUM_5;
 static TaskHandle_t content_request_task_handle;
+static std::atomic<bool> led_cycle_enabled{true};
 
 static void IRAM_ATTR arcade_button_isr(void *argument)
 {
@@ -289,7 +293,7 @@ static void button_task(void *argument)
         }
 
         const TickType_t hold_start = xTaskGetTickCount();
-        const TickType_t required_hold = pdMS_TO_TICKS(200);
+        const TickType_t required_hold = pdMS_TO_TICKS(500);
         bool released = false;
 
         while (xTaskGetTickCount() - hold_start < required_hold)
@@ -312,8 +316,63 @@ static void button_task(void *argument)
 
         if (!released && gpio_get_level(ARCADE_BUTTON_PIN) == 0)
         {
+            led_cycle_enabled.store(false);
+            vTaskDelay(pdMS_TO_TICKS(10));
+            ESP_ERROR_CHECK(ledc_set_duty(LEDC_LOW_SPEED_MODE,
+                                          LEDC_CHANNEL_0, 255));
+            ESP_ERROR_CHECK(ledc_update_duty(LEDC_LOW_SPEED_MODE,
+                                             LEDC_CHANNEL_0));
+
             fetch_content();
+            vTaskDelay(pdMS_TO_TICKS(REFRESH_SECONDS * 1000));
+
+            // Ignore any button edges that occurred while fetching or waiting.
+            ulTaskNotifyTake(pdTRUE, 0);
+            led_cycle_enabled.store(true);
         }
+    }
+}
+
+static void arcade_led_task(void *argument)
+{
+    int brightness = 0;
+    int direction = 1;
+    bool was_cycling = true;
+
+    while (true)
+    {
+        if (!led_cycle_enabled.load())
+        {
+            was_cycling = false;
+            vTaskDelay(pdMS_TO_TICKS(10));
+            continue;
+        }
+
+        if (!was_cycling)
+        {
+            brightness = 255;
+            direction = -1;
+            was_cycling = true;
+        }
+
+        ESP_ERROR_CHECK(ledc_set_duty(LEDC_LOW_SPEED_MODE,
+                                      LEDC_CHANNEL_0, brightness));
+        ESP_ERROR_CHECK(ledc_update_duty(LEDC_LOW_SPEED_MODE,
+                                         LEDC_CHANNEL_0));
+
+        brightness += direction;
+        if (brightness >= 255)
+        {
+            brightness = 255;
+            direction = -1;
+        }
+        else if (brightness <= 0)
+        {
+            brightness = 0;
+            direction = 1;
+        }
+
+        vTaskDelay(pdMS_TO_TICKS(10));
     }
 }
 
@@ -376,6 +435,28 @@ extern "C" void app_main()
     ESP_ERROR_CHECK(gpio_install_isr_service(0));
     ESP_ERROR_CHECK(gpio_isr_handler_add(ARCADE_BUTTON_PIN,
                                          arcade_button_isr, nullptr));
+
+    ledc_timer_config_t led_timer = {};
+    led_timer.speed_mode = LEDC_LOW_SPEED_MODE;
+    led_timer.duty_resolution = LEDC_TIMER_8_BIT;
+    led_timer.timer_num = LEDC_TIMER_0;
+    led_timer.freq_hz = 5000;
+    led_timer.clk_cfg = LEDC_AUTO_CLK;
+    ESP_ERROR_CHECK(ledc_timer_config(&led_timer));
+
+    ledc_channel_config_t led_channel = {};
+    led_channel.gpio_num = ARCADE_LED_PIN;
+    led_channel.speed_mode = LEDC_LOW_SPEED_MODE;
+    led_channel.channel = LEDC_CHANNEL_0;
+    led_channel.timer_sel = LEDC_TIMER_0;
+    led_channel.duty = 0;
+    led_channel.hpoint = 0;
+    ESP_ERROR_CHECK(ledc_channel_config(&led_channel));
+
+    ESP_ERROR_CHECK(xTaskCreate(arcade_led_task, "arcade_led", 2048, nullptr,
+                                4, nullptr) == pdPASS
+                        ? ESP_OK
+                        : ESP_ERR_NO_MEM);
 
     ESP_ERROR_CHECK(esp_netif_init());
     ESP_ERROR_CHECK(esp_event_loop_create_default());
