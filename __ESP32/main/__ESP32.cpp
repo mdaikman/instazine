@@ -21,7 +21,9 @@
 #include "freertos/task.h"
 #include "instazine.h"
 #include "nvs_flash.h"
+#include "printer_encoding.h"
 #include "settings.h"
+#include "usb_printer.h"
 
 using ContentItem = std::variant<banner, textline, article>;
 
@@ -175,7 +177,7 @@ static void print_content()
     {
         if (!first_item)
         {
-            std::printf("-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-\n");
+            std::printf("-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=\n");
         }
         first_item = false;
 
@@ -197,6 +199,168 @@ static void print_content()
                 std::printf("content-value: %s\n",
                             content_item.content_value.c_str());
             } }, item);
+    }
+}
+
+static bool printer_write(const char *text, size_t length)
+{
+    return usb_printer_write(text, length);
+}
+
+static bool printer_write(const std::string &text)
+{
+    return printer_write(text.c_str(), text.size());
+}
+
+static void append_wrapped_printer_line(std::string &document,
+                                        const std::string &text,
+                                        size_t printer_width = 48)
+{
+    size_t paragraph_start = 0;
+
+    while (paragraph_start <= text.size())
+    {
+        const size_t newline = text.find('\n', paragraph_start);
+        const size_t paragraph_end =
+            newline == std::string::npos ? text.size() : newline;
+        size_t word_start = paragraph_start;
+        std::string line;
+
+        while (word_start < paragraph_end)
+        {
+            while (word_start < paragraph_end &&
+                   (text[word_start] == ' ' || text[word_start] == '\t' ||
+                    text[word_start] == '\r'))
+            {
+                ++word_start;
+            }
+            if (word_start >= paragraph_end)
+            {
+                break;
+            }
+
+            size_t word_end = word_start;
+            while (word_end < paragraph_end && text[word_end] != ' ' &&
+                   text[word_end] != '\t' && text[word_end] != '\r')
+            {
+                ++word_end;
+            }
+
+            std::string word = text.substr(word_start, word_end - word_start);
+            word_start = word_end;
+
+            if (!line.empty() && line.size() + 1 + word.size() > printer_width)
+            {
+                document += line;
+                document += "\r\n";
+                line.clear();
+            }
+
+            while (word.size() > printer_width)
+            {
+                if (!line.empty())
+                {
+                    document += line;
+                    document += "\r\n";
+                    line.clear();
+                }
+                document.append(word, 0, printer_width);
+                document += "\r\n";
+                word.erase(0, printer_width);
+            }
+
+            if (!word.empty())
+            {
+                if (!line.empty())
+                {
+                    line += ' ';
+                }
+                line += word;
+            }
+        }
+
+        document += line;
+        document += "\r\n";
+
+        if (newline == std::string::npos)
+        {
+            break;
+        }
+        paragraph_start = newline + 1;
+    }
+}
+
+static void print_content_to_printer()
+{
+    std::string document("\x1b\x40", 2);
+    document.append("\x1b\x74", 2); // ESC t: select character table
+    document.push_back(static_cast<char>(PRINTER_CODE_PAGE));
+    bool first_item = true;
+
+    const auto write_pair = [&document](const char *key,
+                                        const std::string &value)
+    {
+        (void)key;
+        append_wrapped_printer_line(
+            document, printer_encode_windows_1252(value));
+    };
+    const auto write_double_height_pair = [&document](
+                                              const char *key,
+                                              const std::string &value)
+    {
+        const std::string encoded_value =
+            printer_encode_windows_1252(value);
+        const bool use_double_width = encoded_value.size() < 24;
+        document.append("\x1b\x61\x01", 3); // ESC a 1: center
+        if (use_double_width)
+        {
+            // GS ! 0x11: double width and double height.
+            document.append("\x1d\x21\x11", 3);
+        }
+        else
+        {
+            // GS ! 0x01: double height only.
+            document.append("\x1d\x21\x01", 3);
+        }
+        (void)key;
+        append_wrapped_printer_line(document, encoded_value,
+                                    use_double_width ? 24 : 48);
+        document.append("\x1d\x21\x00", 3); // GS ! 0: normal size
+        document.append("\x1b\x61\x00", 3); // ESC a 0: left align
+    };
+
+    for (const ContentItem &item : Content)
+    {
+        if (!first_item)
+        {
+            static constexpr char separator[] =
+                "-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=\r\n";
+            document.append(separator, sizeof(separator) - 1);
+        }
+        first_item = false;
+
+        std::visit([&write_pair, &write_double_height_pair](
+                       const auto &content_item)
+                   {
+            using ItemType = std::decay_t<decltype(content_item)>;
+
+            if constexpr (std::is_same_v<ItemType, article>) {
+                write_double_height_pair(
+                    "headline", content_item.content_value.headline);
+                write_pair("pic", content_item.content_value.pic);
+                write_pair("text", content_item.content_value.text);
+            } else {
+                write_pair("content-value", content_item.content_value);
+            } }, item);
+    }
+
+    document += "\r\n\r\n\r\n";
+    document.append("\x1d\x56\x00", 3); // GS V 0: full cut
+
+    if (!printer_write(document))
+    {
+        std::printf("Error\nUnable to print API content\n");
+        std::fflush(stdout);
     }
 }
 
@@ -270,6 +434,8 @@ static void fetch_content()
     else if (parse_content(response))
     {
         print_content();
+        std::fflush(stdout);
+        print_content_to_printer();
     }
 
     std::fflush(stdout);
@@ -452,6 +618,8 @@ extern "C" void app_main()
     led_channel.duty = 0;
     led_channel.hpoint = 0;
     ESP_ERROR_CHECK(ledc_channel_config(&led_channel));
+
+    ESP_ERROR_CHECK(usb_printer_init() ? ESP_OK : ESP_FAIL);
 
     ESP_ERROR_CHECK(xTaskCreate(arcade_led_task, "arcade_led", 2048, nullptr,
                                 4, nullptr) == pdPASS
