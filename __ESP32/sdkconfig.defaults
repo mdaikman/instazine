@@ -1,1 +1,8 @@
 CONFIG_IDF_TARGET="esp32s3"
+CONFIG_ESPTOOLPY_FLASHSIZE_16MB=y
+CONFIG_PARTITION_TABLE_CUSTOM=y
+CONFIG_PARTITION_TABLE_CUSTOM_FILENAME="partitions.csv"
+# PSRAM is intentionally disabled. Affected ESP32-S3 rev v0.2 N16R8 modules
+# hang on their first access to AP octal PSRAM under ESP-IDF 6.0.2.
+# CONFIG_SPIRAM is not set
+CONFIG_BOOTLOADER_WDT_TIME_MS=9000

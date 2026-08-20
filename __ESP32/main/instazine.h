@@ -17,6 +17,19 @@ public:
     }
 };
 
+class divider {
+public:
+    std::string content_type = "divider";
+    std::string content_value;
+
+    divider() = default;
+
+    explicit divider(std::string value)
+        : content_value(std::move(value))
+    {
+    }
+};
+
 class textline {
 public:
     std::string content_type = "textline";

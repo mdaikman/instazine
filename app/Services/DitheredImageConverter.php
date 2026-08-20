@@ -7,18 +7,27 @@ use Illuminate\Validation\ValidationException;
 
 class DitheredImageConverter
 {
-    private const WIDTH = 450;
-
     /**
-     * Convert an uploaded image to a 450px-wide, dithered 1-bit PNG.
+     * Convert an uploaded image to a printer-width, dithered bitmap.
      */
     public function convert(UploadedFile $picture): string
     {
         $source = $this->createImage($picture);
+        $printerWidth = max(1, (int) config('instazine.printer_pixel_width'));
+        $maximumHeight = max(1, (int) config('instazine.image_height_max'));
 
         try {
-            $height = max(1, (int) round(imagesy($source) * self::WIDTH / imagesx($source)));
-            $converted = imagecreatetruecolor(self::WIDTH, $height);
+            $sourceWidth = imagesx($source);
+            $sourceHeight = imagesy($source);
+            $width = $printerWidth;
+            $height = max(1, (int) round($sourceHeight * $width / $sourceWidth));
+
+            if ($height > $maximumHeight) {
+                $height = $maximumHeight;
+                $width = max(1, (int) round($sourceWidth * $height / $sourceHeight));
+            }
+
+            $converted = imagecreatetruecolor($width, $height);
             $white = imagecolorallocate($converted, 255, 255, 255);
             imagefill($converted, 0, 0, $white);
             imagecopyresampled(
@@ -28,17 +37,17 @@ class DitheredImageConverter
                 0,
                 0,
                 0,
-                self::WIDTH,
+                $width,
                 $height,
-                imagesx($source),
-                imagesy($source),
+                $sourceWidth,
+                $sourceHeight,
             );
 
-            $this->ditherToOneBit($converted, self::WIDTH, $height);
+            $this->ditherToOneBit($converted, $width, $height);
             imagetruecolortopalette($converted, false, 2);
 
             ob_start();
-            imagepng($converted, null, 9);
+            imagebmp($converted, null, true);
             $contents = ob_get_clean();
             imagedestroy($converted);
 

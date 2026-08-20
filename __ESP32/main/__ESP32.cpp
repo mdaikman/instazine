@@ -14,6 +14,7 @@
 #include "driver/gpio.h"
 #include "driver/ledc.h"
 #include "esp_http_client.h"
+#include "esp_heap_caps.h"
 #include "esp_log.h"
 #include "esp_netif.h"
 #include "esp_wifi.h"
@@ -25,13 +26,15 @@
 #include "settings.h"
 #include "usb_printer.h"
 
-using ContentItem = std::variant<banner, textline, article>;
+using ContentItem = std::variant<banner, divider, textline, article>;
 
 std::vector<ContentItem> Content;
 
 static const char *TAG = "wifi_client";
 static constexpr gpio_num_t ARCADE_BUTTON_PIN = GPIO_NUM_4;
 static constexpr gpio_num_t ARCADE_LED_PIN = GPIO_NUM_5;
+static constexpr char CONTENT_DIVIDER[] =
+    "-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=\r\n";
 static TaskHandle_t content_request_task_handle;
 static std::atomic<bool> led_cycle_enabled{true};
 
@@ -131,6 +134,16 @@ static bool parse_content(const http_response_t &response)
             }
             parsed_content.emplace_back(banner(value->valuestring));
         }
+        else if (std::strcmp(type->valuestring, "divider") == 0)
+        {
+            if (!cJSON_IsString(value) || value->valuestring == nullptr)
+            {
+                std::printf("Error\nDivider has no valid content-value\n");
+                cJSON_Delete(root);
+                return false;
+            }
+            parsed_content.emplace_back(divider(value->valuestring));
+        }
         else if (std::strcmp(type->valuestring, "textline") == 0)
         {
             if (!cJSON_IsString(value) || value->valuestring == nullptr)
@@ -210,6 +223,468 @@ static bool printer_write(const char *text, size_t length)
 static bool printer_write(const std::string &text)
 {
     return printer_write(text.c_str(), text.size());
+}
+
+static esp_err_t http_event_handler(esp_http_client_event_t *event);
+
+static bool is_safe_printer_text(const std::string &text)
+{
+    if (text.empty() || text.size() > 4096)
+        return false;
+
+    for (size_t index = 0; index < text.size();)
+    {
+        const uint8_t first = static_cast<uint8_t>(text[index]);
+        if (first < 0x80)
+        {
+            if ((first < 0x20 && first != '\n' && first != '\r' &&
+                 first != '\t') || first == 0x7f)
+                return false;
+            ++index;
+            continue;
+        }
+
+        size_t length = 0;
+        uint32_t codepoint = 0;
+        uint32_t minimum = 0;
+        if ((first & 0xe0) == 0xc0)
+        {
+            length = 2;
+            codepoint = first & 0x1f;
+            minimum = 0x80;
+        }
+        else if ((first & 0xf0) == 0xe0)
+        {
+            length = 3;
+            codepoint = first & 0x0f;
+            minimum = 0x800;
+        }
+        else if ((first & 0xf8) == 0xf0)
+        {
+            length = 4;
+            codepoint = first & 0x07;
+            minimum = 0x10000;
+        }
+        else
+            return false;
+
+        if (index + length > text.size())
+            return false;
+        for (size_t offset = 1; offset < length; ++offset)
+        {
+            const uint8_t byte = static_cast<uint8_t>(text[index + offset]);
+            if ((byte & 0xc0) != 0x80)
+                return false;
+            codepoint = (codepoint << 6) | (byte & 0x3f);
+        }
+        if (codepoint < minimum || codepoint > 0x10ffff ||
+            (codepoint >= 0xd800 && codepoint <= 0xdfff) ||
+            (codepoint >= 0x80 && codepoint <= 0x9f))
+            return false;
+        index += length;
+    }
+    return true;
+}
+
+static bool has_relative_bmp_url(const std::string &url)
+{
+    const size_t colon = url.find(':');
+    const size_t slash = url.find('/');
+    if (url.size() < 5 || url.compare(0, 2, "//") == 0 ||
+        url.find('\\') != std::string::npos ||
+        url.find('?') != std::string::npos ||
+        url.find('#') != std::string::npos ||
+        (colon != std::string::npos &&
+         (slash == std::string::npos || colon < slash)))
+    {
+        return false;
+    }
+
+    size_t segment_start = url[0] == '/' ? 1 : 0;
+    while (segment_start <= url.size())
+    {
+        const size_t segment_end = url.find('/', segment_start);
+        const size_t length = (segment_end == std::string::npos
+                                   ? url.size()
+                                   : segment_end) - segment_start;
+        if (length == 0 ||
+            (length == 1 && url[segment_start] == '.') ||
+            (length == 2 && url.compare(segment_start, 2, "..") == 0))
+            return false;
+        if (segment_end == std::string::npos)
+            break;
+        segment_start = segment_end + 1;
+    }
+
+    for (const unsigned char byte : url)
+    {
+        if (byte < 0x20 || byte == 0x7f)
+            return false;
+    }
+
+    const size_t suffix = url.size() - 4;
+    const auto ascii_lower = [](unsigned char byte)
+    {
+        return byte >= 'A' && byte <= 'Z' ? byte + ('a' - 'A') : byte;
+    };
+    return url[suffix] == '.' &&
+           ascii_lower(static_cast<unsigned char>(url[suffix + 1])) == 'b' &&
+           ascii_lower(static_cast<unsigned char>(url[suffix + 2])) == 'm' &&
+           ascii_lower(static_cast<unsigned char>(url[suffix + 3])) == 'p';
+}
+
+static std::string url_encode_query_value(const std::string &value)
+{
+    static constexpr char hex[] = "0123456789ABCDEF";
+    std::string encoded;
+    encoded.reserve(value.size() * 3);
+
+    for (const unsigned char byte : value)
+    {
+        const bool is_ascii_letter =
+            (byte >= 'A' && byte <= 'Z') || (byte >= 'a' && byte <= 'z');
+        const bool is_ascii_digit = byte >= '0' && byte <= '9';
+        if (is_ascii_letter || is_ascii_digit || byte == '-' || byte == '_' ||
+            byte == '.' || byte == '~')
+        {
+            encoded.push_back(static_cast<char>(byte));
+        }
+        else
+        {
+            encoded.push_back('%');
+            encoded.push_back(hex[byte >> 4]);
+            encoded.push_back(hex[byte & 0x0f]);
+        }
+    }
+    return encoded;
+}
+
+static bool http_get(const std::string &url, http_response_t &response)
+{
+    const bool is_https = url.compare(0, 8, "https://") == 0;
+    esp_http_client_config_t config = {};
+    config.url = url.c_str();
+    config.method = HTTP_METHOD_GET;
+    config.event_handler = http_event_handler;
+    config.user_data = &response;
+    config.timeout_ms = 10000;
+    config.crt_bundle_attach = is_https ? esp_crt_bundle_attach : nullptr;
+
+    esp_http_client_handle_t client = esp_http_client_init(&config);
+    if (client == nullptr)
+    {
+        return false;
+    }
+
+    const esp_err_t result = esp_http_client_perform(client);
+    const int status = result == ESP_OK
+                           ? esp_http_client_get_status_code(client)
+                           : 0;
+    esp_http_client_cleanup(client);
+    return result == ESP_OK && status >= 200 && status < 300;
+}
+
+static bool post_printer_status(uint8_t port_status)
+{
+    static constexpr char ping_api_url[] =
+        BASE_DOMAIN ":" BASE_PORT PING_API_ROUTE;
+    const char *paper_status =
+        (port_status & 0x20) != 0 ? "paper empty" : "paper present";
+    const char *selection_status =
+        (port_status & 0x10) != 0 ? "selected" : "not selected";
+    const char *error_status =
+        (port_status & 0x08) != 0 ? "no error" : "error";
+    char body[128];
+    const int body_length = std::snprintf(
+        body, sizeof(body),
+        "{\"Message\":\"0x%02X - %s, %s, %s\"}", port_status,
+        paper_status, selection_status, error_status);
+    if (body_length <= 0 || body_length >= static_cast<int>(sizeof(body)))
+    {
+        return false;
+    }
+
+    const bool is_https =
+        std::strncmp(ping_api_url, "https://", 8) == 0;
+    esp_http_client_config_t config = {};
+    config.url = ping_api_url;
+    config.method = HTTP_METHOD_POST;
+    config.timeout_ms = 10000;
+    config.crt_bundle_attach = is_https ? esp_crt_bundle_attach : nullptr;
+
+    esp_http_client_handle_t client = esp_http_client_init(&config);
+    if (client == nullptr)
+    {
+        return false;
+    }
+
+    esp_http_client_set_header(client, "Content-Type", "application/json");
+    esp_err_t result = esp_http_client_open(client, body_length);
+    if (result == ESP_OK)
+    {
+        const int written =
+            esp_http_client_write(client, body, body_length);
+        if (written != body_length)
+        {
+            result = ESP_FAIL;
+        }
+    }
+    if (result == ESP_OK)
+    {
+        // The ping response body is not used. Reading only the headers avoids
+        // failing on servers that omit the final zero-length HTTP chunk.
+        esp_http_client_fetch_headers(client);
+    }
+    const int status_code = esp_http_client_get_status_code(client);
+    esp_http_client_cleanup(client);
+    return result == ESP_OK && status_code >= 200 && status_code < 300;
+}
+
+static const char *find_json_value(const char *json, const char *key)
+{
+    const char *position = std::strstr(json, key);
+    if (position == nullptr)
+    {
+        return nullptr;
+    }
+    position += std::strlen(key);
+    while (*position == ' ' || *position == '\r' || *position == '\n' ||
+           *position == '\t')
+        ++position;
+    if (*position++ != ':')
+        return nullptr;
+    while (*position == ' ' || *position == '\r' || *position == '\n' ||
+           *position == '\t')
+        ++position;
+    return position;
+}
+
+static bool parse_json_size(const char *json, const char *key, size_t &value)
+{
+    const char *position = find_json_value(json, key);
+    if (position == nullptr || *position < '0' || *position > '9')
+        return false;
+
+    value = 0;
+    while (*position >= '0' && *position <= '9')
+    {
+        const unsigned digit = static_cast<unsigned>(*position++ - '0');
+        if (value > (SIZE_MAX - digit) / 10)
+            return false;
+        value = value * 10 + digit;
+    }
+    return true;
+}
+
+static bool decode_base64_pixels(const char *position, size_t expected_size,
+                                 std::vector<uint8_t> &decoded)
+{
+    uint32_t accumulator = 0;
+    unsigned available_bits = 0;
+    while (*position != '\0' && *position != '"')
+    {
+        const unsigned char byte =
+            static_cast<unsigned char>(*position++);
+        int value = -1;
+        if (byte >= 'A' && byte <= 'Z')
+            value = byte - 'A';
+        else if (byte >= 'a' && byte <= 'z')
+            value = byte - 'a' + 26;
+        else if (byte >= '0' && byte <= '9')
+            value = byte - '0' + 52;
+        else if (byte == '+')
+            value = 62;
+        else if (byte == '/')
+            value = 63;
+        else if (byte == '=')
+            break;
+        else if (byte == ' ' || byte == '\r' || byte == '\n' ||
+                 byte == '\t')
+            continue;
+        else
+            return false;
+
+        accumulator = (accumulator << 6) | value;
+        available_bits += 6;
+        if (available_bits >= 8)
+        {
+            if (decoded.size() >= expected_size)
+                return false;
+            available_bits -= 8;
+            decoded.push_back(static_cast<uint8_t>(
+                (accumulator >> available_bits) & 0xff));
+            accumulator &= available_bits != 0
+                               ? (1u << available_bits) - 1u
+                               : 0u;
+        }
+    }
+    return decoded.size() == expected_size;
+}
+
+static bool decode_array_pixels(const char *position, size_t expected_size,
+                                std::vector<uint8_t> &decoded)
+{
+    while (true)
+    {
+        while (*position == ' ' || *position == '\r' || *position == '\n' ||
+               *position == '\t')
+            ++position;
+        if (*position == ']')
+            return decoded.size() == expected_size;
+        if (*position < '0' || *position > '9' ||
+            decoded.size() >= expected_size)
+            return false;
+
+        unsigned value = 0;
+        while (*position >= '0' && *position <= '9')
+        {
+            value = value * 10 + static_cast<unsigned>(*position++ - '0');
+            if (value > 255)
+                return false;
+        }
+        decoded.push_back(static_cast<uint8_t>(value));
+
+        while (*position == ' ' || *position == '\r' || *position == '\n' ||
+               *position == '\t')
+            ++position;
+        if (*position == ',')
+            ++position;
+        else if (*position != ']')
+            return false;
+    }
+}
+
+static bool parse_picture_json(const char *json, size_t &width,
+                               size_t &height,
+                               std::vector<uint8_t> &pixels)
+{
+    if (!parse_json_size(json, "\"width\"", width) ||
+        !parse_json_size(json, "\"height\"", height) || width == 0 ||
+        height == 0 || width > PRINTER_PIXEL_WIDTH || height > 65535)
+        return false;
+
+    const size_t expected_size = ((width + 7) / 8) * height;
+    const char *position = find_json_value(json, "\"pixels\"");
+    if (position == nullptr)
+        return false;
+    pixels.reserve(expected_size);
+    if (*position == '[')
+        return decode_array_pixels(position + 1, expected_size, pixels);
+    if (*position == '"')
+        return decode_base64_pixels(position + 1, expected_size, pixels);
+    return false;
+}
+
+static bool print_pic_to_printer(const std::string &pic_url)
+{
+    if (!has_relative_bmp_url(pic_url))
+    {
+        return false;
+    }
+
+    const std::string request_url =
+        BASE_DOMAIN ":" BASE_PORT PIC_API_ROUTE "?url=" +
+        url_encode_query_value(pic_url);
+    size_t width = 0;
+    size_t height = 0;
+    std::vector<uint8_t> source;
+    static constexpr unsigned max_attempts = 4; // Initial + 3 retries.
+    bool decoded = false;
+    for (unsigned attempt = 1; attempt <= max_attempts; ++attempt)
+    {
+        std::printf("Retrieving picture (attempt %u/%u): %s\n",
+                    attempt, max_attempts, pic_url.c_str());
+        http_response_t response;
+        const bool retrieved = http_get(request_url, response);
+        if (retrieved && response.data != nullptr && response.length != 0)
+        {
+            const char *response_start = response.data;
+            while (*response_start == ' ' || *response_start == '\r' ||
+                   *response_start == '\n' || *response_start == '\t')
+                ++response_start;
+            if (std::strncmp(response_start, "null", 4) == 0)
+            {
+                std::free(response.data);
+                return false;
+            }
+
+            width = 0;
+            height = 0;
+            source.clear();
+            decoded = parse_picture_json(response.data, width, height,
+                                         source);
+        }
+        std::free(response.data);
+
+        if (decoded)
+            break;
+
+        if (attempt < max_attempts)
+        {
+            std::printf("Picture retrieval or decoding failed; retrying %s\n",
+                        pic_url.c_str());
+            vTaskDelay(pdMS_TO_TICKS(250));
+        }
+    }
+    if (!decoded)
+    {
+        std::printf("Error\nUnable to retrieve or decode picture after "
+                    "3 retries: %s\n", pic_url.c_str());
+        return false;
+    }
+    std::printf("Decoded picture: %ux%u pixels\n",
+                static_cast<unsigned>(width),
+                static_cast<unsigned>(height));
+    const size_t source_bytes_per_row = (width + 7) / 8;
+
+    static constexpr size_t destination_bytes_per_row =
+        (PRINTER_PIXEL_WIDTH + 7) / 8;
+    const uint8_t *raster_data = source.data();
+    size_t raster_size = source.size();
+    std::vector<uint8_t> centered;
+    if (width < PRINTER_PIXEL_WIDTH)
+    {
+        centered.resize(destination_bytes_per_row * height, 0);
+        const size_t left_padding = (PRINTER_PIXEL_WIDTH - width) / 2;
+
+        for (size_t y = 0; y < height; ++y)
+        {
+            for (size_t x = 0; x < width; ++x)
+            {
+                const uint8_t source_mask = 0x80 >> (x & 7);
+                if ((source[y * source_bytes_per_row + x / 8] &
+                     source_mask) != 0)
+                {
+                    const size_t destination_x = left_padding + x;
+                    centered[y * destination_bytes_per_row +
+                             destination_x / 8] |=
+                        0x80 >> (destination_x & 7);
+                }
+            }
+        }
+        raster_data = centered.data();
+        raster_size = centered.size();
+    }
+
+    const uint8_t raster_header[] = {
+        0x1d, 0x76, 0x30, 0x00, // GS v 0, normal raster
+        static_cast<uint8_t>(destination_bytes_per_row & 0xff),
+        static_cast<uint8_t>((destination_bytes_per_row >> 8) & 0xff),
+        static_cast<uint8_t>(height & 0xff),
+        static_cast<uint8_t>((height >> 8) & 0xff),
+    };
+    if (!printer_write(reinterpret_cast<const char *>(raster_header),
+                       sizeof(raster_header)) ||
+        !printer_write(reinterpret_cast<const char *>(raster_data),
+                       raster_size) ||
+        !printer_write("\r\n", 2))
+    {
+        std::printf("Error\nUnable to send picture to printer: %s\n",
+                    pic_url.c_str());
+        return false;
+    }
+    std::printf("Printed picture: %s\n", pic_url.c_str());
+    return true;
 }
 
 static void append_wrapped_printer_line(std::string &document,
@@ -295,7 +770,24 @@ static void print_content_to_printer()
     std::string document("\x1b\x40", 2);
     document.append("\x1b\x74", 2); // ESC t: select character table
     document.push_back(static_cast<char>(PRINTER_CODE_PAGE));
-    bool first_item = true;
+    bool print_failed = false;
+
+    const auto flush_document = [&document, &print_failed]()
+    {
+        if (document.empty())
+            return true;
+        if (!printer_write(document))
+        {
+            print_failed = true;
+            return false;
+        }
+
+        // Release the segment's capacity so it is not retained while the
+        // next image response and raster buffers are allocated.
+        std::string empty;
+        document.swap(empty);
+        return true;
+    };
 
     const auto write_pair = [&document](const char *key,
                                         const std::string &value)
@@ -328,26 +820,92 @@ static void print_content_to_printer()
         document.append("\x1d\x21\x00", 3); // GS ! 0: normal size
         document.append("\x1b\x61\x00", 3); // ESC a 0: left align
     };
+    const auto write_centered_double_height = [&document](
+                                                   const std::string &value)
+    {
+        document.append("\x1b\x61\x01", 3); // ESC a 1: center
+        document.append("\x1d\x21\x01", 3); // GS ! 1: double height
+        append_wrapped_printer_line(
+            document, printer_encode_windows_1252(value), 48);
+        document.append("\x1d\x21\x00", 3); // GS ! 0: normal size
+        document.append("\x1b\x61\x00", 3); // ESC a 0: left align
+    };
+    const auto write_centered_single_height = [&document](
+                                                   const std::string &value)
+    {
+        document.append("\x1b\x61\x01", 3); // ESC a 1: center
+        document.append("\x1d\x21\x00", 3); // GS ! 0: normal size
+        append_wrapped_printer_line(
+            document, printer_encode_windows_1252(value), 48);
+        document.append("\x1b\x61\x00", 3); // ESC a 0: left align
+    };
 
     for (const ContentItem &item : Content)
     {
-        if (!first_item)
-        {
-            static constexpr char separator[] =
-                "-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=\r\n";
-            document.append(separator, sizeof(separator) - 1);
-        }
-        first_item = false;
+        if (print_failed)
+            break;
 
-        std::visit([&write_pair, &write_double_height_pair](
+        const bool printable = std::visit([](const auto &content_item)
+        {
+            using ItemType = std::decay_t<decltype(content_item)>;
+            if constexpr (std::is_same_v<ItemType, banner>)
+            {
+                return has_relative_bmp_url(content_item.content_value) ||
+                       is_safe_printer_text(content_item.content_value);
+            }
+            return true;
+        }, item);
+        if (!printable)
+            continue;
+
+        std::visit([&document, &write_pair, &write_double_height_pair,
+                    &write_centered_double_height,
+                    &write_centered_single_height, &flush_document](
                        const auto &content_item)
                    {
             using ItemType = std::decay_t<decltype(content_item)>;
 
-            if constexpr (std::is_same_v<ItemType, article>) {
+            if constexpr (std::is_same_v<ItemType, banner>) {
+                if (has_relative_bmp_url(content_item.content_value))
+                {
+                    if (!flush_document())
+                        return;
+                    print_pic_to_printer(content_item.content_value);
+                }
+                else
+                {
+                    write_centered_double_height(content_item.content_value);
+                }
+                document += "\r\n\r\n\r\n\r\n\r\n\r\n";
+            } else if constexpr (std::is_same_v<ItemType, divider>) {
+                // ESC J 12: add a half-line (12-dot) margin above.
+                document.append("\x1b\x4a\x0c", 3);
+                if (has_relative_bmp_url(content_item.content_value))
+                {
+                    if (!flush_document())
+                        return;
+                    print_pic_to_printer(content_item.content_value);
+                }
+                else if (is_safe_printer_text(content_item.content_value))
+                {
+                    write_centered_single_height(content_item.content_value);
+                }
+                else
+                {
+                    document.append(CONTENT_DIVIDER,
+                                    sizeof(CONTENT_DIVIDER) - 1);
+                }
+                // Match the top margin without adding a full blank line.
+                document.append("\x1b\x4a\x0c", 3); // ESC J 12
+            } else if constexpr (std::is_same_v<ItemType, article>) {
                 write_double_height_pair(
                     "headline", content_item.content_value.headline);
-                write_pair("pic", content_item.content_value.pic);
+                if (!flush_document())
+                    return;
+                if (print_pic_to_printer(content_item.content_value.pic))
+                {
+                    document += "\r\n\r\n\r\n\r\n\r\n\r\n";
+                }
                 write_pair("text", content_item.content_value.text);
             } else {
                 write_pair("content-value", content_item.content_value);
@@ -357,10 +915,21 @@ static void print_content_to_printer()
     document += "\r\n\r\n\r\n";
     document.append("\x1d\x56\x00", 3); // GS V 0: full cut
 
-    if (!printer_write(document))
+    if (print_failed || !flush_document())
     {
         std::printf("Error\nUnable to print API content\n");
         std::fflush(stdout);
+        return;
+    }
+
+    uint8_t port_status = 0;
+    if (!usb_printer_get_port_status(port_status))
+    {
+        std::printf("Error\nUnable to get printer port status\n");
+    }
+    else if (!post_printer_status(port_status))
+    {
+        std::printf("Error\nUnable to send printer status to ping API\n");
     }
 }
 
@@ -373,8 +942,13 @@ static esp_err_t http_event_handler(esp_http_client_event_t *event)
 
     auto *response = static_cast<http_response_t *>(event->user_data);
     const size_t new_length = response->length + event->data_len;
-    auto *new_data =
-        static_cast<char *>(std::realloc(response->data, new_length + 1));
+    auto *new_data = static_cast<char *>(heap_caps_realloc(
+        response->data, new_length + 1, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT));
+    if (new_data == nullptr)
+    {
+        new_data = static_cast<char *>(heap_caps_realloc(
+            response->data, new_length + 1, MALLOC_CAP_8BIT));
+    }
     if (new_data == nullptr)
     {
         return ESP_ERR_NO_MEM;
@@ -391,11 +965,13 @@ static esp_err_t http_event_handler(esp_http_client_event_t *event)
 static void fetch_content()
 {
     http_response_t response;
+    static constexpr char content_api_url[] =
+        BASE_DOMAIN ":" BASE_PORT CONTENT_API_ROUTE;
     const bool is_https =
-        std::strncmp(CONTENT_API_URL, "https://", 8) == 0;
+        std::strncmp(content_api_url, "https://", 8) == 0;
 
     esp_http_client_config_t config = {};
-    config.url = CONTENT_API_URL;
+    config.url = content_api_url;
     config.method = HTTP_METHOD_GET;
     config.event_handler = http_event_handler;
     config.user_data = &response;
@@ -414,6 +990,8 @@ static void fetch_content()
     const int status_code = result == ESP_OK
                                 ? esp_http_client_get_status_code(client)
                                 : 0;
+    esp_http_client_cleanup(client);
+    client = nullptr;
 
     if (result != ESP_OK || status_code < 200 || status_code >= 300)
     {
@@ -433,13 +1011,18 @@ static void fetch_content()
     }
     else if (parse_content(response))
     {
+        // Parsing copies all retained values into Content. Release the HTTP
+        // response before downloading and decoding pictures so internal RAM
+        // can be reused for their JSON and raster buffers.
+        std::free(response.data);
+        response.data = nullptr;
+        response.length = 0;
         print_content();
         std::fflush(stdout);
         print_content_to_printer();
     }
 
     std::fflush(stdout);
-    esp_http_client_cleanup(client);
     std::free(response.data);
 }
 

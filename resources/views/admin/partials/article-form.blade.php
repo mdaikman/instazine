@@ -33,7 +33,13 @@
 @if ($article)
     <div>
         <label for="article-author-{{ $article->A_id }}">Author</label>
-        <input id="article-author-{{ $article->A_id }}" type="number" name="author" min="1" value="{{ $article->Author }}" required>
+        <input
+            id="article-author-{{ $article->A_id }}"
+            type="text"
+            value="{{ $article->author?->name ?? "Unknown user #{$article->Author}" }}"
+            readonly
+        >
+        <input type="hidden" name="author" value="{{ $article->Author }}">
     </div>
 @endif
 

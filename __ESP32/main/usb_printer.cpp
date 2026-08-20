@@ -25,10 +25,18 @@ constexpr int USB_EVENT_QUEUE_DEPTH = 8;
 
 const char *TAG = "usb_printer";
 
-struct print_job_t
+enum class printer_job_type_t
 {
+    write,
+    get_port_status,
+};
+
+struct printer_job_t
+{
+    printer_job_type_t type;
     const uint8_t *data;
     std::size_t length;
+    uint8_t *port_status;
     SemaphoreHandle_t completion;
     esp_err_t result;
 };
@@ -59,6 +67,7 @@ std::atomic<bool> printer_ready{false};
 
 esp_err_t send_chunk(printer_state_t &state, const uint8_t *data,
                      std::size_t length);
+esp_err_t get_port_status(printer_state_t &state, uint8_t &status);
 
 void transfer_complete(usb_transfer_t *transfer)
 {
@@ -339,11 +348,66 @@ esp_err_t send_chunk(printer_state_t &state, const uint8_t *data,
     return result;
 }
 
-void process_print_job(printer_state_t &state, print_job_t &job)
+esp_err_t get_port_status(printer_state_t &state, uint8_t &status)
+{
+    constexpr std::size_t transfer_size = sizeof(usb_setup_packet_t) + 1;
+    usb_transfer_t *transfer = nullptr;
+    esp_err_t result = usb_host_transfer_alloc(transfer_size, 0, &transfer);
+    if (result != ESP_OK)
+    {
+        return result;
+    }
+
+    auto *setup =
+        reinterpret_cast<usb_setup_packet_t *>(transfer->data_buffer);
+    setup->bmRequestType = 0xa1; // Device-to-host, class, interface
+    setup->bRequest = 1;        // USB Printer Class GET_PORT_STATUS
+    setup->wValue = 0;
+    setup->wIndex = state.interface_number;
+    setup->wLength = 1;
+
+    transfer_result_t transfer_result = {};
+    transfer->num_bytes = transfer_size;
+    transfer->device_handle = state.device;
+    transfer->bEndpointAddress = 0;
+    transfer->callback = transfer_complete;
+    transfer->context = &transfer_result;
+
+    result = usb_host_transfer_submit_control(state.client, transfer);
+    while (result == ESP_OK && !transfer_result.completed)
+    {
+        result = usb_host_client_handle_events(state.client, portMAX_DELAY);
+    }
+
+    if (result == ESP_OK &&
+        (transfer_result.status != USB_TRANSFER_STATUS_COMPLETED ||
+         transfer_result.actual_bytes < static_cast<int>(transfer_size)))
+    {
+        result = ESP_FAIL;
+    }
+    if (result == ESP_OK)
+    {
+        status = transfer->data_buffer[sizeof(usb_setup_packet_t)];
+    }
+
+    usb_host_transfer_free(transfer);
+    return result;
+}
+
+void process_printer_job(printer_state_t &state, printer_job_t &job)
 {
     if (!printer_ready.load() || state.device == nullptr)
     {
         job.result = ESP_ERR_INVALID_STATE;
+        xSemaphoreGive(job.completion);
+        return;
+    }
+
+    if (job.type == printer_job_type_t::get_port_status)
+    {
+        job.result = job.port_status != nullptr
+                         ? get_port_status(state, *job.port_status)
+                         : ESP_ERR_INVALID_ARG;
         xSemaphoreGive(job.completion);
         return;
     }
@@ -411,10 +475,10 @@ void usb_printer_task(void *argument)
             open_device(state);
         }
 
-        print_job_t *job = nullptr;
+        printer_job_t *job = nullptr;
         if (xQueueReceive(print_queue, &job, 0) == pdTRUE && job != nullptr)
         {
-            process_print_job(state, *job);
+            process_printer_job(state, *job);
         }
     }
 }
@@ -422,7 +486,7 @@ void usb_printer_task(void *argument)
 
 bool usb_printer_init()
 {
-    print_queue = xQueueCreate(4, sizeof(print_job_t *));
+    print_queue = xQueueCreate(4, sizeof(printer_job_t *));
     write_mutex = xSemaphoreCreateMutex();
     if (print_queue == nullptr || write_mutex == nullptr)
     {
@@ -481,14 +545,54 @@ bool usb_printer_write(const char *data, std::size_t length)
         return false;
     }
 
-    print_job_t job = {
+    printer_job_t job = {
+        .type = printer_job_type_t::write,
         .data = reinterpret_cast<const uint8_t *>(data),
         .length = length,
+        .port_status = nullptr,
         .completion = completion,
         .result = ESP_FAIL,
     };
-    print_job_t *job_pointer = &job;
+    printer_job_t *job_pointer = &job;
 
+    bool success = xQueueSend(print_queue, &job_pointer, portMAX_DELAY) ==
+                   pdTRUE;
+    if (success)
+    {
+        xSemaphoreTake(completion, portMAX_DELAY);
+        success = job.result == ESP_OK;
+    }
+
+    vSemaphoreDelete(completion);
+    xSemaphoreGive(write_mutex);
+    return success;
+}
+
+bool usb_printer_get_port_status(uint8_t &status)
+{
+    if (!printer_ready.load() || print_queue == nullptr ||
+        write_mutex == nullptr)
+    {
+        return false;
+    }
+
+    xSemaphoreTake(write_mutex, portMAX_DELAY);
+    SemaphoreHandle_t completion = xSemaphoreCreateBinary();
+    if (completion == nullptr)
+    {
+        xSemaphoreGive(write_mutex);
+        return false;
+    }
+
+    printer_job_t job = {
+        .type = printer_job_type_t::get_port_status,
+        .data = nullptr,
+        .length = 0,
+        .port_status = &status,
+        .completion = completion,
+        .result = ESP_FAIL,
+    };
+    printer_job_t *job_pointer = &job;
     bool success = xQueueSend(print_queue, &job_pointer, portMAX_DELAY) ==
                    pdTRUE;
     if (success)
