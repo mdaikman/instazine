@@ -70,15 +70,27 @@ In general, the layout follows this format with some adjustments from settings. 
 
 ## Content modes
 Content mode selection is currently set in the .env file. It can either be:
+```
 EXPRESS: Do the requested number of header textlines.
          Randomly select the requested number of alternating articles and middle texts from the settings.
          Do the requested number of footer textlines.
+LLL:     Latest, Least, then Lottery
+         Same as EXPRESS mode but content is not all random.
+         The first article will always be the latest published
+         Half of the articles will be randomly selected from the least seen so far
+         After that articles are chosen at random
+
+No mode will print the same article or textline twice.
+```
 
 ## File systems
 More on this later.
 For now, understand that the github has 2 independent folders.
-The main folder which contains all the needed CMS handling files.
+
+```
+root folder which contains all the needed CMS handling files.
 __ESP32 subfolder which contains the the .cpp and related files to flash to the ESP32S3
+```
 
 
 UPDATES
