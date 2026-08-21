@@ -27,7 +27,8 @@ Currently, the settings are all for a 80mm wide paper with 576 pixels over USB. 
 
 In general, the layout follows this format with some adjustments from settings. Mode will determine the content presented.
 
-`"""""""""""""""""""""""""""""""""" <- Top of sheet
+```
+"""""""""""""""""""""""""""""""""" <- Top of sheet
  --------- BANNER IMAGE ----------
  --------- BANNER IMAGE ----------
  Header textline
@@ -57,7 +58,7 @@ In general, the layout follows this format with some adjustments from settings. 
  Article text. Text.
  ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ <- decorative divider image
  Footer text-only bit.
-`
+```
 
 ## Content modes
 Content mode selection is currently set in the .env file. It can either be:
