@@ -3,6 +3,14 @@
 Updated (09-08-20)
 Checkout the webpage at https://pbrp.ca/blog for more.
 
+## Disclosure
+This code was created primarily with AI using Codex. Only small changes were coded by me by hand.
+Overall, I just architect-ed what I knew wanted with the tech knowledge had from CMS systems and microcontrollers.
+I had Codex generate the code for me and that allowed me to do the things I needed to do in the time I needed to do it.
+I would have loved to have hand-coded this, but it was the difference between using hand-tools and power-tools to make a building go up.
+I understood what I asked for and received though, otherwise I would not have used that code.
+I was new to making code for ESP32 and Codex was extremely helpful in helping me understand how it differed my usual Arduino and Micropython work.
+
 ## What it is
 This is intended to be a push-button->receive-paper zine-like super-local publishing project.
 It is being prototyped to be served from a localhost CMS in Laravel to a ESP32S3 microcontroller that makes a wifi API GET request and prints the response as a zine-like thing on a thermal printer when a button is pressed.
