@@ -146,11 +146,12 @@ class AdminLandingTest extends TestCase
         $article = Article::query()->create([
             'Approved' => false,
             'Headline' => 'Original headline',
-            'Pic' => 'image.jpg',
+            'Pic' => 'article-pics/image.bmp',
             'Text' => "First line.\nSecond line.",
             'Author' => $honcho->id,
             'Date' => '2026-08-02 09:00:00',
         ]);
+        Storage::disk('local')->put($article->Pic, 'bitmap');
         Tracking::query()->create(['A_id' => $article->A_id]);
         Tracking::query()->create(['A_id' => $article->A_id]);
 
@@ -172,7 +173,10 @@ class AdminLandingTest extends TestCase
             ->assertSee('Edit article')
             ->assertSee('id="article-author-'.$article->A_id.'"', false)
             ->assertSee('value="'.$honcho->name.'"', false)
-            ->assertSee('type="hidden" name="author" value="'.$honcho->id.'"', false);
+            ->assertSee('type="hidden" name="author" value="'.$honcho->id.'"', false)
+            ->assertSee('class="article-form-thumbnail"', false)
+            ->assertSee('class="article-picture-input"', false)
+            ->assertDontSee('Current file');
 
         $this->actingAs($honcho)
             ->put(route('admin.articles.update', $article), [

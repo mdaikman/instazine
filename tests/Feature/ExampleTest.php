@@ -16,6 +16,11 @@ class ExampleTest extends TestCase
 
         $response->assertOk()
             ->assertSee('Push Button 👉 Receive Paper')
+            ->assertSee("url('/images/textures/banner-paper-blue.webp')", false)
+            ->assertSee("url('/images/textures/sidebar-paper-green.webp')", false)
+            ->assertSee("url('/images/textures/main-washi-paper.webp')", false)
+            ->assertSee('aria-controls="main-menu-panel"', false)
+            ->assertSee('aria-label="Close menu"', false)
             ->assertSee('Login');
     }
 }

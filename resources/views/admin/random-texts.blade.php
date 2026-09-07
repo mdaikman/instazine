@@ -57,7 +57,7 @@
                         <time
                             class="tracking-date tracking-last-seen"
                             @if ($randomText->tracking_max_created_at) data-utc-date="{{ $randomText->tracking_max_created_at->toIso8601String() }}" @endif
-                        >{{ $randomText->tracking_max_created_at?->format('Y-m-d H:i') ?? '—' }}</time>
+                        >@if ($randomText->tracking_max_created_at)<span class="tracking-date-part">{{ $randomText->tracking_max_created_at->format('Y-m-d') }}</span> <span class="tracking-time-part">{{ $randomText->tracking_max_created_at->format('H:i') }}</span>@else—@endif</time>
                     </td>
                 </tr>
             @empty
@@ -175,6 +175,27 @@
         .tracking-last-seen {
             white-space: nowrap;
         }
+
+        @media (max-width: 767px) {
+            .random-texts-table tbody td.table-actions {
+                display: flex;
+                flex-direction: column;
+                gap: 0.5rem;
+                align-items: stretch;
+            }
+
+            .random-texts-table tbody td.table-actions .inline-form {
+                display: block;
+            }
+
+            .random-texts-table tbody td.table-actions button {
+                width: 100%;
+            }
+
+            .random-texts-table .tracking-time-part {
+                display: block;
+            }
+        }
     </style>
 @endpush
 
@@ -202,13 +223,13 @@
             });
         });
 
-        const trackingDateFormatter = new Intl.DateTimeFormat(undefined, {
-            dateStyle: 'short',
-            timeStyle: 'short',
-        });
+        const trackingDateFormatter = new Intl.DateTimeFormat(undefined, { dateStyle: 'short' });
+        const trackingTimeFormatter = new Intl.DateTimeFormat(undefined, { timeStyle: 'short' });
 
         document.querySelectorAll('.tracking-date[data-utc-date]').forEach((element) => {
-            element.textContent = trackingDateFormatter.format(new Date(element.dataset.utcDate));
+            const date = new Date(element.dataset.utcDate);
+            element.querySelector('.tracking-date-part').textContent = trackingDateFormatter.format(date);
+            element.querySelector('.tracking-time-part').textContent = trackingTimeFormatter.format(date);
         });
     </script>
 @endpush

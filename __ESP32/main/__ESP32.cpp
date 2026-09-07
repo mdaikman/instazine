@@ -461,6 +461,12 @@ static bool post_ping_message(const char *message)
              reinterpret_cast<const unsigned char *>(message);
          *position != '\0' && length + 4 < sizeof(body); ++position)
     {
+        if (*position == '\n')
+        {
+            body[length++] = '\\';
+            body[length++] = 'n';
+            continue;
+        }
         if (*position == '"' || *position == '\\')
             body[length++] = '\\';
         body[length++] = *position < 0x20 ? ' ' : static_cast<char>(*position);
@@ -517,10 +523,34 @@ static bool post_printer_status(uint8_t port_status)
         (port_status & 0x10) != 0 ? "selected" : "not selected";
     const char *error_status =
         (port_status & 0x08) != 0 ? "no error" : "error";
-    char message[128];
-    const int length = std::snprintf(
-        message, sizeof(message), "0x%02X - %s, %s, %s", port_status,
-        paper_status, selection_status, error_status);
+    wifi_ap_record_t access_point = {};
+    const bool have_signal = esp_wifi_sta_get_ap_info(&access_point) == ESP_OK;
+    const int rssi = have_signal ? access_point.rssi : 0;
+    const char *signal_description = "unavailable";
+    if (have_signal)
+    {
+        if (rssi >= -50)
+            signal_description = "excellent";
+        else if (rssi >= -60)
+            signal_description = "good";
+        else if (rssi >= -70)
+            signal_description = "fair";
+        else if (rssi >= -80)
+            signal_description = "weak";
+        else
+            signal_description = "very weak";
+    }
+
+    char message[192];
+    const int length = have_signal
+        ? std::snprintf(message, sizeof(message),
+                        "0x%02X - %s, %s, %s\nWiFi signal: %d dBm - %s",
+                        port_status, paper_status, selection_status,
+                        error_status, rssi, signal_description)
+        : std::snprintf(message, sizeof(message),
+                        "0x%02X - %s, %s, %s\nWiFi signal: unavailable",
+                        port_status, paper_status, selection_status,
+                        error_status);
     return length > 0 && length < static_cast<int>(sizeof(message)) &&
            post_ping_message(message);
 }

@@ -21,6 +21,7 @@
     <button type="submit">Apply</button>
 </form>
 
+<div class="articles-table-scroll" role="region" aria-label="Articles table" tabindex="0">
 <table class="articles-table">
     <thead>
         <tr>
@@ -96,6 +97,7 @@
         @endforelse
     </tbody>
 </table>
+</div>
 
 {{ $articles->links() }}
 
@@ -104,7 +106,7 @@
         @csrf
         <h3>Create new article</h3>
         @include('admin.partials.article-form', ['article' => null])
-        <div>
+        <div class="article-form-actions">
             <button type="button" id="close-create-article-modal">Cancel</button>
             <button type="submit">Create</button>
         </div>
@@ -118,7 +120,7 @@
         @method('PUT')
         <h3>Edit article</h3>
         @include('admin.partials.article-form', ['article' => $article])
-        <div>
+        <div class="article-form-actions">
             <button type="button" data-close-modal="edit-article-modal-{{ $article->A_id }}">Cancel</button>
             <button type="submit">Save</button>
         </div>
@@ -131,6 +133,15 @@
 <style>
     .articles-table {
         border-collapse: collapse;
+        min-width: 100%;
+    }
+
+    .articles-table-scroll {
+        width: 100%;
+        max-width: 100%;
+        overflow-x: auto;
+        overscroll-behavior-inline: contain;
+        -webkit-overflow-scrolling: touch;
     }
 
     .articles-table th,
@@ -148,6 +159,34 @@
 
     .article-modal textarea {
         padding: 6px;
+    }
+
+    .article-modal .article-form-field {
+        display: grid;
+        grid-template-columns: 7rem minmax(0, 1fr);
+        gap: 5px;
+        align-items: start;
+        padding: 5px;
+    }
+
+    .article-modal .article-form-field > input:not([type='hidden']),
+    .article-modal .article-form-field > textarea {
+        width: 100%;
+        min-width: 0;
+    }
+
+    .article-modal .article-picture-input,
+    .article-modal .article-form-thumbnail {
+        grid-column: 2;
+    }
+
+    .article-modal .article-form-thumbnail {
+        width: min(225px, 100%);
+        height: auto;
+    }
+
+    .article-modal .article-form-actions {
+        padding: 5px;
     }
 
     .article-picture {
@@ -175,6 +214,56 @@
 
     .tracking-last-seen {
         white-space: nowrap;
+    }
+
+    @media (max-width: 767px) {
+        .articles-table-scroll {
+            max-width: calc(100vw - 2rem);
+        }
+
+        .articles-table tbody td.table-actions {
+            display: flex;
+            flex-direction: column;
+            gap: 0.5rem;
+            align-items: stretch;
+        }
+
+        .articles-table tbody td.table-actions .inline-form {
+            display: block;
+        }
+
+        .articles-table tbody td.table-actions button {
+            width: 100%;
+        }
+
+        .article-picture-path {
+            display: none;
+        }
+
+        .article-picture-cell {
+            width: 100px;
+            min-width: 100px;
+        }
+
+        .article-modal {
+            width: calc(100vw - 2rem);
+            max-width: calc(100vw - 2rem);
+            max-height: calc(100dvh - 2rem);
+            padding: 1rem;
+            overflow-x: hidden;
+            overflow-y: auto;
+        }
+
+        .article-modal form,
+        .article-modal .article-form-field {
+            min-width: 0;
+            max-width: 100%;
+        }
+
+        .article-modal input,
+        .article-modal textarea {
+            max-width: 100%;
+        }
     }
 </style>
 @endpush

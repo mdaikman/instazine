@@ -48,6 +48,8 @@ class ReporterLandingTest extends TestCase
             ->assertOk()
             ->assertSee(route('reporter.suggest-story'), false)
             ->assertSee('Suggest a story')
+            ->assertSee('class="suggest-story-form"', false)
+            ->assertSee('class="suggest-story-actions"', false)
             ->assertDontSee('article-date-new', false);
     }
 
