@@ -139,7 +139,10 @@ class AdminLandingTest extends TestCase
     public function test_honcho_can_list_edit_and_delete_articles(): void
     {
         Storage::fake('local');
-        $honcho = User::factory()->create(['level' => UserLevel::Honcho]);
+        $honcho = User::factory()->create([
+            'name' => 'Article Author',
+            'level' => UserLevel::Honcho,
+        ]);
         $article = Article::query()->create([
             'Approved' => false,
             'Headline' => 'Original headline',
@@ -166,7 +169,10 @@ class AdminLandingTest extends TestCase
             ->assertSee($honcho->name)
             ->assertSee('2 times')
             ->assertSee('Last:')
-            ->assertSee('Edit article');
+            ->assertSee('Edit article')
+            ->assertSee('id="article-author-'.$article->A_id.'"', false)
+            ->assertSee('value="'.$honcho->name.'"', false)
+            ->assertSee('type="hidden" name="author" value="'.$honcho->id.'"', false);
 
         $this->actingAs($honcho)
             ->put(route('admin.articles.update', $article), [
@@ -196,6 +202,7 @@ class AdminLandingTest extends TestCase
     public function test_new_articles_are_always_approved(): void
     {
         Storage::fake('local');
+        config()->set('instazine.printer_pixel_width', 384);
         $honcho = User::factory()->create(['level' => UserLevel::Honcho]);
         $otherUser = User::factory()->create();
 
@@ -223,11 +230,15 @@ class AdminLandingTest extends TestCase
 
         $article = Article::query()->where('Headline', 'New headline')->sole();
 
-        $this->assertMatchesRegularExpression('#^article-pics/.+\.png$#', $article->Pic);
+        $this->assertMatchesRegularExpression('#^article-pics/.+\.bmp$#', $article->Pic);
         Storage::disk('local')->assertExists($article->Pic);
 
-        $image = imagecreatefromstring(Storage::disk('local')->get($article->Pic));
-        $this->assertSame(450, imagesx($image));
+        $contents = Storage::disk('local')->get($article->Pic);
+        $this->assertSame('BM', substr($contents, 0, 2));
+        $this->assertSame('image/bmp', getimagesizefromstring($contents)['mime']);
+
+        $image = imagecreatefromstring($contents);
+        $this->assertSame(384, imagesx($image));
         $this->assertLessThanOrEqual(2, imagecolorstotal($image));
         imagedestroy($image);
 

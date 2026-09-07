@@ -94,8 +94,11 @@ class ReporterLandingTest extends TestCase
         $this->assertFalse($article->Approved);
         $this->assertSame($reporter->id, $article->Author);
         $this->assertNotNull($article->Date);
-        $this->assertMatchesRegularExpression('#^article-pics/.+\.png$#', $article->Pic);
+        $this->assertMatchesRegularExpression('#^article-pics/.+\.bmp$#', $article->Pic);
         Storage::disk('local')->assertExists($article->Pic);
+        $contents = Storage::disk('local')->get($article->Pic);
+        $this->assertSame('BM', substr($contents, 0, 2));
+        $this->assertSame('image/bmp', getimagesizefromstring($contents)['mime']);
     }
 
     public function test_reporter_name_must_use_database_safe_characters(): void

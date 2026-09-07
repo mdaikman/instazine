@@ -152,7 +152,7 @@ class ArticleController extends Controller
 
     private function storeConvertedPicture(\Illuminate\Http\UploadedFile $picture): string
     {
-        $path = 'article-pics/'.Str::uuid().'.png';
+        $path = 'article-pics/'.Str::uuid().'.bmp';
         Storage::disk('local')->put($path, $this->imageConverter->convert($picture));
 
         return $path;
