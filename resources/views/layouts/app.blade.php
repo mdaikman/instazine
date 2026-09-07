@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>@yield('title', 'Instazine! prototype')</title>
+    <title>@yield('title', 'Push Button 👉 Receive Paper')</title>
     <style>
         :root {
             color-scheme: light;
@@ -157,7 +157,7 @@
 </head>
 <body>
     <header class="banner">
-        <h1>Instazine! prototype</h1>
+        <h1>Push Button 👉 Receive Paper</h1>
         @if (filled($latestHealth?->Message))
             <small class="health-message">
                 {{ $latestHealth->Message }}<span class="health-date">{{ $latestHealth->Date?->format('H:i d/m/Y') }}</span>

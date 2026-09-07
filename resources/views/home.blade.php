@@ -1,3 +1,3 @@
 @extends('layouts.app')
 
-@section('title', 'Instazine! prototype')
+@section('title', 'Push Button 👉 Receive Paper')

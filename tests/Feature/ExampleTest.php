@@ -15,7 +15,7 @@ class ExampleTest extends TestCase
         $response = $this->get('/');
 
         $response->assertOk()
-            ->assertSee('Instazine! prototype')
+            ->assertSee('Push Button 👉 Receive Paper')
             ->assertSee('Login');
     }
 }
