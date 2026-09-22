@@ -140,6 +140,35 @@ class ReporterLandingTest extends TestCase
             ->assertSee('Remember this story text.');
     }
 
+    public function test_picture_rejected_by_php_shows_the_php_limit_and_keeps_story_fields(): void
+    {
+        $reporter = User::factory()->create(['level' => UserLevel::Reporter]);
+        $temporaryPicture = UploadedFile::fake()->image('php-rejected.jpg');
+        $rejectedPicture = new UploadedFile(
+            $temporaryPicture->getPathname(),
+            'php-rejected.jpg',
+            'image/jpeg',
+            UPLOAD_ERR_INI_SIZE,
+            true,
+        );
+
+        $response = $this->actingAs($reporter)
+            ->followingRedirects()
+            ->from(route('reporter.suggest-story'))
+            ->post(route('reporter.suggest-story.store'), [
+                '_article_form' => 'suggest-story',
+                'headline' => 'Keep after PHP rejection',
+                'pic' => $rejectedPicture,
+                'text' => 'This text should also remain.',
+            ]);
+
+        $response
+            ->assertOk()
+            ->assertSee('The image was rejected because its file size exceeds the 32 MB limit.')
+            ->assertSee('value="Keep after PHP rejection"', false)
+            ->assertSee('This text should also remain.');
+    }
+
     public function test_failed_reporter_article_creation_removes_the_new_picture(): void
     {
         Storage::fake('local');

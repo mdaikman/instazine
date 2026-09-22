@@ -9,6 +9,7 @@ use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Str;
+use Illuminate\Validation\ValidationException;
 use Illuminate\View\View;
 
 class ArticleController extends Controller
@@ -144,6 +145,8 @@ class ArticleController extends Controller
      */
     private function validatedArticle(Request $request): array
     {
+        $this->rejectPhpOversizedPicture($request);
+
         $validated = $request->validate([
             'headline' => ['nullable', 'string', 'max:64'],
             'pic' => [
@@ -159,6 +162,7 @@ class ArticleController extends Controller
             'timezone' => ['required', 'timezone'],
         ], [
             'pic.max' => $this->pictureFileSizeMessage(),
+            'pic.uploaded' => 'The image was rejected because the server could not accept the upload. The file may exceed the 32 MB limit.',
         ]);
 
         return [
@@ -185,6 +189,17 @@ class ArticleController extends Controller
             'The image was rejected because its file size exceeds the %g MB limit.',
             $maximumMegabytes,
         );
+    }
+
+    private function rejectPhpOversizedPicture(Request $request): void
+    {
+        $picture = $request->file('pic');
+
+        if ($picture?->getError() === UPLOAD_ERR_INI_SIZE) {
+            throw ValidationException::withMessages([
+                'pic' => 'The image was rejected because its file size exceeds the 32 MB limit.',
+            ]);
+        }
     }
 
     private function storeConvertedPicture(\Illuminate\Http\UploadedFile $picture): string
