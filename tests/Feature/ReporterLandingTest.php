@@ -68,6 +68,21 @@ class ReporterLandingTest extends TestCase
         $this->assertSame(1, User::query()->where('name', 'newsroom')->count());
     }
 
+    public function test_reporter_login_ignores_an_admin_intended_destination(): void
+    {
+        $reporter = User::factory()->create([
+            'name' => 'newsroom',
+            'level' => UserLevel::Reporter,
+        ]);
+
+        $this->withSession(['url.intended' => route('admin.articles')])
+            ->post('/login', [
+                'name' => $reporter->name,
+                'password' => 'instazine',
+            ])
+            ->assertRedirect(route('reporter.suggest-story'));
+    }
+
     public function test_reporter_suggestions_are_saved_as_unapproved_articles_for_the_current_user(): void
     {
         Storage::fake('local');
@@ -101,6 +116,93 @@ class ReporterLandingTest extends TestCase
         $contents = Storage::disk('local')->get($article->Pic);
         $this->assertSame('BM', substr($contents, 0, 2));
         $this->assertSame('image/bmp', getimagesizefromstring($contents)['mime']);
+    }
+
+    public function test_oversized_reporter_picture_shows_the_reason_and_keeps_story_fields(): void
+    {
+        config()->set('instazine.image_upload_kilobytes_max', 1024);
+        $reporter = User::factory()->create(['level' => UserLevel::Reporter]);
+
+        $response = $this->actingAs($reporter)
+            ->followingRedirects()
+            ->from(route('reporter.suggest-story'))
+            ->post(route('reporter.suggest-story.store'), [
+                '_article_form' => 'suggest-story',
+                'headline' => 'Remember this headline',
+                'pic' => UploadedFile::fake()->image('large.jpg')->size(1025),
+                'text' => 'Remember this story text.',
+            ]);
+
+        $response
+            ->assertOk()
+            ->assertSee('The image was rejected because its file size exceeds the 1 MB limit.')
+            ->assertSee('value="Remember this headline"', false)
+            ->assertSee('Remember this story text.');
+    }
+
+    public function test_picture_rejected_by_php_shows_the_php_limit_and_keeps_story_fields(): void
+    {
+        $reporter = User::factory()->create(['level' => UserLevel::Reporter]);
+        $temporaryPicture = UploadedFile::fake()->image('php-rejected.jpg');
+        $rejectedPicture = new UploadedFile(
+            $temporaryPicture->getPathname(),
+            'php-rejected.jpg',
+            'image/jpeg',
+            UPLOAD_ERR_INI_SIZE,
+            true,
+        );
+
+        $response = $this->actingAs($reporter)
+            ->followingRedirects()
+            ->from(route('reporter.suggest-story'))
+            ->post(route('reporter.suggest-story.store'), [
+                '_article_form' => 'suggest-story',
+                'headline' => 'Keep after PHP rejection',
+                'pic' => $rejectedPicture,
+                'text' => 'This text should also remain.',
+            ]);
+
+        $response
+            ->assertOk()
+            ->assertSee('The image was rejected because its file size exceeds the 32 MB limit.')
+            ->assertSee('value="Keep after PHP rejection"', false)
+            ->assertSee('This text should also remain.');
+    }
+
+    public function test_failed_reporter_article_creation_removes_the_new_picture(): void
+    {
+        Storage::fake('local');
+        config()->set('instazine.printer_pixel_width', 384);
+        $reporter = User::factory()->create(['level' => UserLevel::Reporter]);
+
+        Article::creating(static function (): void {
+            throw new \RuntimeException('Deliberate reporter article creation failure.');
+        });
+
+        try {
+            $this->withoutExceptionHandling();
+
+            try {
+                $this->actingAs($reporter)
+                    ->post(route('reporter.suggest-story.store'), [
+                        'headline' => 'Failed suggestion',
+                        'pic' => UploadedFile::fake()->image('failed.jpg'),
+                        'text' => 'This should not be saved.',
+                    ]);
+
+                $this->fail('Expected reporter article creation to fail.');
+            } catch (\RuntimeException $exception) {
+                $this->assertSame(
+                    'Deliberate reporter article creation failure.',
+                    $exception->getMessage(),
+                );
+            }
+
+            $this->assertDatabaseMissing('Article', ['Headline' => 'Failed suggestion']);
+            $this->assertSame([], Storage::disk('local')->files('article-pics'));
+        } finally {
+            Article::flushEventListeners();
+        }
     }
 
     public function test_reporter_name_must_use_database_safe_characters(): void

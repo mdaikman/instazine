@@ -24,8 +24,10 @@ class LoginController extends Controller
             Auth::login($user);
             $request->session()->regenerate();
 
-            return redirect()->intended(
-                route($user->level === UserLevel::Honcho ? 'admin.articles' : 'reporter.suggest-story'),
+            return redirect()->route(
+                $user->level === UserLevel::Honcho
+                    ? 'admin.articles'
+                    : 'reporter.suggest-story',
             );
         }
 
@@ -51,7 +53,7 @@ class LoginController extends Controller
         Auth::login($user);
         $request->session()->regenerate();
 
-        return redirect()->intended(route('reporter.suggest-story'));
+        return redirect()->route('reporter.suggest-story');
     }
 
     public function destroy(Request $request): RedirectResponse

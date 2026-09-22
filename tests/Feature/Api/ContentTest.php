@@ -92,6 +92,49 @@ class ContentTest extends TestCase
             ->assertDatabaseHas('Tracking', ['R_id' => $footer->R_id]);
     }
 
+    public function test_express_mode_returns_requested_unique_random_texts_when_available(): void
+    {
+        config()->set('instazine.mode', 'EXPRESS');
+        config()->set('instazine.headers', 2);
+        config()->set('instazine.articles', 2);
+        config()->set('instazine.middles', 2);
+        config()->set('instazine.footers', 2);
+        config()->set('instazine.dividers', []);
+
+        foreach (['Header A', 'Header B'] as $text) {
+            RandomText::query()->create(['Type' => 'HEADER', 'Random_text' => $text]);
+        }
+
+        foreach (['Middle A', 'Middle B'] as $text) {
+            RandomText::query()->create(['Type' => 'MID', 'Random_text' => $text]);
+        }
+
+        foreach (['Footer A', 'Footer B'] as $text) {
+            RandomText::query()->create(['Type' => 'FOOTER', 'Random_text' => $text]);
+        }
+
+        $this->createArticle('Article A', '2026-08-18 12:00:00');
+        $this->createArticle('Article B', '2026-08-17 12:00:00');
+
+        $textlines = collect($this->getJson('/api/content')->assertOk()->json('content.items'))
+            ->where('content-type', 'textline')
+            ->pluck('content-value');
+
+        $this->assertCount(6, $textlines);
+        $this->assertCount(6, $textlines->unique());
+        $this->assertEqualsCanonicalizing(
+            [
+                'Header A',
+                'Header B',
+                'Middle A',
+                'Middle B',
+                'Footer A',
+                'Footer B',
+            ],
+            $textlines->all(),
+        );
+    }
+
     public function test_content_length_is_the_json_body_length_in_bytes(): void
     {
         config()->set('instazine.mode', 'EXPRESS');

@@ -75,7 +75,7 @@ class ContentController extends Controller
         $dividerIndex = 0;
 
         for ($index = 0; $index < max(0, (int) config('instazine.headers')); $index++) {
-            $header = $this->randomText('HEADER');
+            $header = $this->randomText('HEADER', $seenHeaders);
 
             if ($header && !in_array($header['id'], $seenHeaders, true)) {
                 $this->appendItem($items, 'textline', $header['value'], $dividers, $dividerIndex);
@@ -96,7 +96,7 @@ class ContentController extends Controller
             }
 
             if ($mids > 0) {
-                $mid = $this->randomText('MID');
+                $mid = $this->randomText('MID', $seenMids);
 
                 if ($mid && !in_array($mid['id'], $seenMids, true)) {
                     $this->appendItem($items, 'textline', $mid['value'], $dividers, $dividerIndex);
@@ -108,7 +108,7 @@ class ContentController extends Controller
         }
 
         for ($index = 0; $index < max(0, (int) config('instazine.footers')); $index++) {
-            $footer = $this->randomText('FOOTER');
+            $footer = $this->randomText('FOOTER', $seenFooters);
 
             if ($footer && !in_array($footer['id'], $seenFooters, true)) {
                 $this->appendItem($items, 'textline', $footer['value'], $dividers, $dividerIndex);
@@ -155,12 +155,14 @@ class ContentController extends Controller
     }
 
     /**
+     * @param list<int> $excludedIds
      * @return array{id: int, value: string}|null
      */
-    private function randomText(string $type): ?array
+    private function randomText(string $type, array $excludedIds = []): ?array
     {
         $text = RandomText::query()
             ->where('Type', $type)
+            ->when($excludedIds !== [], fn ($query) => $query->whereNotIn('R_id', $excludedIds))
             ->inRandomOrder()
             ->first(['R_id', 'Random_text']);
 

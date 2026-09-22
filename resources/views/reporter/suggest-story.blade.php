@@ -15,7 +15,11 @@
 
 <form class="suggest-story-form" method="post" action="{{ route('reporter.suggest-story.store') }}" enctype="multipart/form-data">
     @csrf
-    @include('admin.partials.article-form', ['article' => null, 'showDate' => false])
+    @include('admin.partials.article-form', [
+        'article' => null,
+        'showDate' => false,
+        'formKey' => 'suggest-story',
+    ])
     <div class="suggest-story-actions">
         <button type="submit">Submit suggestion</button>
     </div>
@@ -46,9 +50,19 @@
         padding: 5px;
     }
 
+    .suggest-story-form .article-form-error {
+        grid-column: 2;
+        color: #b00020;
+        margin: 0;
+    }
+
     @media (max-width: 480px) {
         .suggest-story-form .article-form-field {
             grid-template-columns: 1fr;
+        }
+
+        .suggest-story-form .article-form-error {
+            grid-column: 1;
         }
     }
 </style>

@@ -24,7 +24,7 @@ class HealthController extends Controller
         }
 
         $validated = Validator::make($payload, [
-            'Message' => ['required', 'string'],
+            'Message' => ['required', 'string', 'max:512'],
         ])->validate();
 
         $message = trim(strip_tags($validated['Message']));

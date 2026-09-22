@@ -55,6 +55,8 @@ RTC_NOINIT_ATTR static retained_failure_t retained_failure;
 static esp_reset_reason_t boot_reset_reason = ESP_RST_UNKNOWN;
 static bool startup_report_sent = false;
 
+static constexpr size_t MAX_HTTP_RESPONSE_SIZE = 1024 * 1024;
+
 static bool post_ping_message(const char *message);
 
 static void report_error(const char *format, ...)
@@ -1082,6 +1084,13 @@ static esp_err_t http_event_handler(esp_http_client_event_t *event)
     }
 
     auto *response = static_cast<http_response_t *>(event->user_data);
+
+    if (response->length > MAX_HTTP_RESPONSE_SIZE ||
+        event->data_len > MAX_HTTP_RESPONSE_SIZE - response->length)
+    {
+        return ESP_ERR_INVALID_SIZE;
+    }
+
     const size_t new_length = response->length + event->data_len;
     auto *new_data = static_cast<char *>(heap_caps_realloc(
         response->data, new_length + 1, MALLOC_CAP_8BIT));

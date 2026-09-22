@@ -37,6 +37,19 @@ class HealthMessageTest extends TestCase
         ]);
     }
 
+    public function test_health_message_cannot_exceed_512_characters(): void
+    {
+        $this->postJson('/api/ping', [
+            'Message' => str_repeat('a', 512),
+        ])->assertCreated();
+
+        $this->postJson('/api/ping', [
+            'Message' => str_repeat('a', 513),
+        ])->assertUnprocessable();
+
+        $this->assertDatabaseCount('Health', 1);
+    }
+
     public function test_health_message_requires_exactly_one_json_message_field(): void
     {
         $this->postJson('/api/ping', [

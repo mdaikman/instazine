@@ -23,6 +23,21 @@ class DitheredImageConverterTest extends TestCase
         imagedestroy($image);
     }
 
+    public function test_it_rejects_images_exceeding_the_source_pixel_limit(): void
+    {
+        config()->set('instazine.image_source_pixels_max', 10_000);
+
+        $contents = app(DitheredImageConverter::class)
+            ->convert(UploadedFile::fake()->image('allowed.png', 100, 100));
+
+        $this->assertNotEmpty($contents);
+
+        $this->expectException(\Illuminate\Validation\ValidationException::class);
+
+        app(DitheredImageConverter::class)
+            ->convert(UploadedFile::fake()->image('too-large.png', 101, 100));
+    }
+
     public function test_it_uses_the_printer_width_when_the_scaled_height_is_below_the_cap(): void
     {
         config()->set('instazine.printer_pixel_width', 400);

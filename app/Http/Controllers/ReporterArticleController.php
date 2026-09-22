@@ -9,6 +9,7 @@ use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Str;
+use Illuminate\Validation\ValidationException;
 use Illuminate\View\View;
 
 class ReporterArticleController extends Controller
@@ -27,21 +28,41 @@ class ReporterArticleController extends Controller
     public function store(Request $request): RedirectResponse
     {
         $this->ensureReporter($request);
+        $this->rejectPhpOversizedPicture($request);
 
         $validated = $request->validate([
             'headline' => ['nullable', 'string', 'max:64'],
-            'pic' => ['nullable', 'file', 'image', 'mimes:jpg,jpeg,png,gif,webp,avif', 'max:5120'],
+            'pic' => [
+                'nullable',
+                'file',
+                'image',
+                'mimes:jpg,jpeg,png,gif,webp,avif',
+                'max:'.config('instazine.image_upload_kilobytes_max'),
+            ],
             'text' => ['nullable', 'string'],
+        ], [
+            'pic.max' => $this->pictureFileSizeMessage(),
+            'pic.uploaded' => 'The image was rejected because the server could not accept the upload. The file may exceed the 32 MB limit.',
         ]);
 
-        $article = Article::query()->create([
-            'Approved' => false,
-            'Headline' => $validated['headline'],
-            'Pic' => $request->hasFile('pic') ? $this->storePicture($request->file('pic')) : null,
-            'Text' => $validated['text'],
-            'Author' => $request->user()->id,
-            'Date' => now(),
-        ]);
+        $newPicture = $request->hasFile('pic')
+            ? $this->storePicture($request->file('pic'))
+            : null;
+
+        try {
+            $article = Article::query()->create([
+                'Approved' => false,
+                'Headline' => $validated['headline'],
+                'Pic' => $newPicture,
+                'Text' => $validated['text'],
+                'Author' => $request->user()->id,
+                'Date' => now(),
+            ]);
+        } catch (\Throwable $exception) {
+            $this->deletePicture($newPicture);
+
+            throw $exception;
+        }
 
         return redirect()->route('reporter.suggest-story.confirmation', $article);
     }
@@ -78,11 +99,39 @@ class ReporterArticleController extends Controller
         abort_unless($article->Author === $request->user()->id, 403);
     }
 
+    private function deletePicture(?string $path): void
+    {
+        if (filled($path) && Str::startsWith($path, 'article-pics/')) {
+            Storage::disk('local')->delete($path);
+        }
+    }
+
     private function storePicture(\Illuminate\Http\UploadedFile $picture): string
     {
         $path = 'article-pics/'.Str::uuid().'.bmp';
         Storage::disk('local')->put($path, $this->imageConverter->convert($picture));
 
         return $path;
+    }
+
+    private function pictureFileSizeMessage(): string
+    {
+        $maximumMegabytes = (int) config('instazine.image_upload_kilobytes_max') / 1024;
+
+        return sprintf(
+            'The image was rejected because its file size exceeds the %g MB limit.',
+            $maximumMegabytes,
+        );
+    }
+
+    private function rejectPhpOversizedPicture(Request $request): void
+    {
+        $picture = $request->file('pic');
+
+        if ($picture?->getError() === UPLOAD_ERR_INI_SIZE) {
+            throw ValidationException::withMessages([
+                'pic' => 'The image was rejected because its file size exceeds the 32 MB limit.',
+            ]);
+        }
     }
 }

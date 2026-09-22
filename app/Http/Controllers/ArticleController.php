@@ -9,6 +9,7 @@ use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Str;
+use Illuminate\Validation\ValidationException;
 use Illuminate\View\View;
 
 class ArticleController extends Controller
@@ -60,9 +61,16 @@ class ArticleController extends Controller
 
         $attributes = $this->validatedArticle($request);
         $attributes['Approved'] = true;
-        $attributes['Pic'] = $this->storePicture($request);
+        $newPicture = $this->storePicture($request);
+        $attributes['Pic'] = $newPicture;
 
-        Article::query()->create($attributes);
+        try {
+            Article::query()->create($attributes);
+        } catch (\Throwable $exception) {
+            $this->deletePicture($newPicture);
+
+            throw $exception;
+        }
 
         return redirect()
             ->route('admin.articles')
@@ -71,12 +79,23 @@ class ArticleController extends Controller
 
     public function update(Request $request, Article $article): RedirectResponse
     {
-        $article->update($this->validatedArticle($request));
+        $attributes = $this->validatedArticle($request);
+        $newPicture = $this->storePicture($request);
+        $oldPicture = $article->Pic;
 
-        if ($request->hasFile('pic')) {
-            $newPicture = $this->storePicture($request);
-            $oldPicture = $article->Pic;
-            $article->update(['Pic' => $newPicture]);
+        if ($newPicture !== null) {
+            $attributes['Pic'] = $newPicture;
+        }
+
+        try {
+            $article->update($attributes);
+        } catch (\Throwable $exception) {
+            $this->deletePicture($newPicture);
+
+            throw $exception;
+        }
+
+        if ($newPicture !== null) {
             $this->deletePicture($oldPicture);
         }
 
@@ -112,8 +131,9 @@ class ArticleController extends Controller
 
     public function destroy(Article $article): RedirectResponse
     {
-        $this->deletePicture($article->Pic);
+        $picture = $article->Pic;
         $article->delete();
+        $this->deletePicture($picture);
 
         return redirect()
             ->route('admin.articles')
@@ -125,13 +145,24 @@ class ArticleController extends Controller
      */
     private function validatedArticle(Request $request): array
     {
+        $this->rejectPhpOversizedPicture($request);
+
         $validated = $request->validate([
             'headline' => ['nullable', 'string', 'max:64'],
-            'pic' => ['nullable', 'file', 'image', 'mimes:jpg,jpeg,png,gif,webp,avif', 'max:5120'],
+            'pic' => [
+                'nullable',
+                'file',
+                'image',
+                'mimes:jpg,jpeg,png,gif,webp,avif',
+                'max:'.config('instazine.image_upload_kilobytes_max'),
+            ],
             'text' => ['nullable', 'string'],
             'author' => ['required', 'integer', 'exists:users,id'],
             'date' => ['required', 'date'],
             'timezone' => ['required', 'timezone'],
+        ], [
+            'pic.max' => $this->pictureFileSizeMessage(),
+            'pic.uploaded' => 'The image was rejected because the server could not accept the upload. The file may exceed the 32 MB limit.',
         ]);
 
         return [
@@ -148,6 +179,27 @@ class ArticleController extends Controller
         return $request->hasFile('pic')
             ? $this->storeConvertedPicture($request->file('pic'))
             : null;
+    }
+
+    private function pictureFileSizeMessage(): string
+    {
+        $maximumMegabytes = (int) config('instazine.image_upload_kilobytes_max') / 1024;
+
+        return sprintf(
+            'The image was rejected because its file size exceeds the %g MB limit.',
+            $maximumMegabytes,
+        );
+    }
+
+    private function rejectPhpOversizedPicture(Request $request): void
+    {
+        $picture = $request->file('pic');
+
+        if ($picture?->getError() === UPLOAD_ERR_INI_SIZE) {
+            throw ValidationException::withMessages([
+                'pic' => 'The image was rejected because its file size exceeds the 32 MB limit.',
+            ]);
+        }
     }
 
     private function storeConvertedPicture(\Illuminate\Http\UploadedFile $picture): string

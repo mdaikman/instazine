@@ -252,6 +252,32 @@ class AdminLandingTest extends TestCase
             ->assertOk();
     }
 
+    public function test_picture_with_too_many_pixels_shows_the_reason_and_keeps_article_fields(): void
+    {
+        config()->set('instazine.image_source_pixels_max', 99);
+        $honcho = User::factory()->create(['level' => UserLevel::Honcho]);
+
+        $response = $this->actingAs($honcho)
+            ->followingRedirects()
+            ->from(route('admin.articles'))
+            ->post(route('admin.articles.store'), [
+                '_article_form' => 'create-article',
+                'headline' => 'Remember this article',
+                'pic' => UploadedFile::fake()->image('too-many-pixels.jpg', 10, 10),
+                'text' => 'Keep this article text.',
+                'author' => $honcho->id,
+                'date' => '2026-08-02T11:00',
+                'timezone' => 'America/Vancouver',
+            ]);
+
+        $response
+            ->assertOk()
+            ->assertSee('The image was rejected because its dimensions are 10 × 10 pixels (100 pixels), exceeding the 99-pixel limit.')
+            ->assertSee('value="Remember this article"', false)
+            ->assertSee('Keep this article text.')
+            ->assertSee('const failedArticleForm = "create-article";', false);
+    }
+
     public function test_honcho_can_toggle_an_article_approval_checkbox(): void
     {
         $honcho = User::factory()->create(['level' => UserLevel::Honcho]);
@@ -414,6 +440,134 @@ class AdminLandingTest extends TestCase
             ->assertSee('2 times')
             ->assertSee('Last:')
             ->assertSee('tracking-date', false);
+    }
+
+    public function test_failed_article_creation_removes_the_new_picture(): void
+    {
+        Storage::fake('local');
+        config()->set('instazine.printer_pixel_width', 384);
+        $honcho = User::factory()->create(['level' => UserLevel::Honcho]);
+
+        Article::creating(static function (): void {
+            throw new \RuntimeException('Deliberate article creation failure.');
+        });
+
+        try {
+            $this->withoutExceptionHandling();
+
+            try {
+                $this->actingAs($honcho)->post('/admin/articles', [
+                    'headline' => 'Failed article',
+                    'pic' => UploadedFile::fake()->image('failed.jpg'),
+                    'text' => 'This should not be saved.',
+                    'author' => $honcho->id,
+                    'date' => '2026-08-02 11:00:00',
+                    'timezone' => 'UTC',
+                ]);
+
+                $this->fail('Expected article creation to fail.');
+            } catch (\RuntimeException $exception) {
+                $this->assertSame('Deliberate article creation failure.', $exception->getMessage());
+            }
+
+            $this->assertDatabaseMissing('Article', ['Headline' => 'Failed article']);
+            $this->assertSame([], Storage::disk('local')->files('article-pics'));
+        } finally {
+            Article::flushEventListeners();
+        }
+    }
+
+    public function test_failed_article_update_removes_the_new_picture_and_preserves_the_old_article(): void
+    {
+        Storage::fake('local');
+        config()->set('instazine.printer_pixel_width', 384);
+        $honcho = User::factory()->create(['level' => UserLevel::Honcho]);
+        $oldPicture = 'article-pics/original.bmp';
+
+        Storage::disk('local')->put($oldPicture, 'original bitmap');
+
+        $article = Article::query()->create([
+            'Approved' => true,
+            'Headline' => 'Original headline',
+            'Pic' => $oldPicture,
+            'Text' => 'Original text',
+            'Author' => $honcho->id,
+            'Date' => '2026-08-02 09:00:00',
+        ]);
+
+        Article::updating(static function (): void {
+            throw new \RuntimeException('Deliberate article update failure.');
+        });
+
+        try {
+            $this->withoutExceptionHandling();
+
+            try {
+                $this->actingAs($honcho)
+                    ->put(route('admin.articles.update', $article), [
+                        'approved' => '1',
+                        'headline' => 'Changed headline',
+                        'pic' => UploadedFile::fake()->image('replacement.jpg'),
+                        'text' => 'Changed text',
+                        'author' => $honcho->id,
+                        'date' => '2026-08-02 10:00:00',
+                        'timezone' => 'UTC',
+                    ]);
+
+                $this->fail('Expected article update to fail.');
+            } catch (\RuntimeException $exception) {
+                $this->assertSame('Deliberate article update failure.', $exception->getMessage());
+            }
+
+            $article->refresh();
+
+            $this->assertSame('Original headline', $article->Headline);
+            $this->assertSame('Original text', $article->Text);
+            $this->assertSame($oldPicture, $article->Pic);
+            Storage::disk('local')->assertExists($oldPicture);
+            $this->assertSame([$oldPicture], Storage::disk('local')->files('article-pics'));
+        } finally {
+            Article::flushEventListeners();
+        }
+    }
+
+    public function test_failed_article_deletion_preserves_the_picture(): void
+    {
+        Storage::fake('local');
+        $honcho = User::factory()->create(['level' => UserLevel::Honcho]);
+        $picture = 'article-pics/existing.bmp';
+
+        Storage::disk('local')->put($picture, 'bitmap');
+
+        $article = Article::query()->create([
+            'Approved' => true,
+            'Headline' => 'Existing article',
+            'Pic' => $picture,
+            'Author' => $honcho->id,
+            'Date' => '2026-08-02 09:00:00',
+        ]);
+
+        Article::deleting(static function (): void {
+            throw new \RuntimeException('Deliberate article deletion failure.');
+        });
+
+        try {
+            $this->withoutExceptionHandling();
+
+            try {
+                $this->actingAs($honcho)
+                    ->delete(route('admin.articles.destroy', $article));
+
+                $this->fail('Expected article deletion to fail.');
+            } catch (\RuntimeException $exception) {
+                $this->assertSame('Deliberate article deletion failure.', $exception->getMessage());
+            }
+
+            $this->assertDatabaseHas('Article', ['A_id' => $article->A_id]);
+            Storage::disk('local')->assertExists($picture);
+        } finally {
+            Article::flushEventListeners();
+        }
     }
 
     public function test_articles_show_valid_private_pictures_below_their_paths(): void

@@ -59,6 +59,27 @@ class DitheredImageConverter
 
     private function createImage(UploadedFile $picture): \GdImage
     {
+        $dimensions = @getimagesize($picture->getRealPath());
+        $maximumPixels = max(1, (int) config('instazine.image_source_pixels_max'));
+
+        if ($dimensions === false || $dimensions[0] <= 0 || $dimensions[1] <= 0) {
+            throw ValidationException::withMessages([
+                'pic' => 'The image was rejected because its dimensions could not be read.',
+            ]);
+        }
+
+        if ($dimensions[0] > intdiv($maximumPixels, $dimensions[1])) {
+            throw ValidationException::withMessages([
+                'pic' => sprintf(
+                    'The image was rejected because its dimensions are %d × %d pixels (%s pixels), exceeding the %s-pixel limit.',
+                    $dimensions[0],
+                    $dimensions[1],
+                    number_format($dimensions[0] * $dimensions[1]),
+                    number_format($maximumPixels),
+                ),
+            ]);
+        }
+
         $source = match ($picture->getMimeType()) {
             'image/jpeg' => imagecreatefromjpeg($picture->getRealPath()),
             'image/png' => imagecreatefrompng($picture->getRealPath()),
