@@ -17,5 +17,7 @@ return [
     // Must match PRINTER_PIXEL_WIDTH in the ESP32 firmware.
     'printer_pixel_width' => (int) env('INSTAZINE_PRINTER_PIXEL_WIDTH', 576),
     'image_height_max' => (int) env('INSTAZINE_IMAGE_HEIGHT_MAX', 2304),
+    // Laravel's file-size validation uses kibibytes (32 MiB = 32,768 KiB).
+    'image_upload_kilobytes_max' => (int) env('INSTAZINE_IMAGE_UPLOAD_KILOBYTES_MAX', 32_768),
     'image_source_pixels_max' => (int) env('INSTAZINE_IMAGE_SOURCE_PIXELS_MAX', 20_000_000),
 ];

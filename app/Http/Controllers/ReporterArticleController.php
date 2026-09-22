@@ -30,7 +30,13 @@ class ReporterArticleController extends Controller
 
         $validated = $request->validate([
             'headline' => ['nullable', 'string', 'max:64'],
-            'pic' => ['nullable', 'file', 'image', 'mimes:jpg,jpeg,png,gif,webp,avif', 'max:5120'],
+            'pic' => [
+                'nullable',
+                'file',
+                'image',
+                'mimes:jpg,jpeg,png,gif,webp,avif',
+                'max:'.config('instazine.image_upload_kilobytes_max'),
+            ],
             'text' => ['nullable', 'string'],
         ]);
 
