@@ -118,6 +118,28 @@ class ReporterLandingTest extends TestCase
         $this->assertSame('image/bmp', getimagesizefromstring($contents)['mime']);
     }
 
+    public function test_oversized_reporter_picture_shows_the_reason_and_keeps_story_fields(): void
+    {
+        config()->set('instazine.image_upload_kilobytes_max', 1024);
+        $reporter = User::factory()->create(['level' => UserLevel::Reporter]);
+
+        $response = $this->actingAs($reporter)
+            ->followingRedirects()
+            ->from(route('reporter.suggest-story'))
+            ->post(route('reporter.suggest-story.store'), [
+                '_article_form' => 'suggest-story',
+                'headline' => 'Remember this headline',
+                'pic' => UploadedFile::fake()->image('large.jpg')->size(1025),
+                'text' => 'Remember this story text.',
+            ]);
+
+        $response
+            ->assertOk()
+            ->assertSee('The image was rejected because its file size exceeds the 1 MB limit.')
+            ->assertSee('value="Remember this headline"', false)
+            ->assertSee('Remember this story text.');
+    }
+
     public function test_failed_reporter_article_creation_removes_the_new_picture(): void
     {
         Storage::fake('local');

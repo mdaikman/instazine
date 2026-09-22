@@ -157,6 +157,8 @@ class ArticleController extends Controller
             'author' => ['required', 'integer', 'exists:users,id'],
             'date' => ['required', 'date'],
             'timezone' => ['required', 'timezone'],
+        ], [
+            'pic.max' => $this->pictureFileSizeMessage(),
         ]);
 
         return [
@@ -173,6 +175,16 @@ class ArticleController extends Controller
         return $request->hasFile('pic')
             ? $this->storeConvertedPicture($request->file('pic'))
             : null;
+    }
+
+    private function pictureFileSizeMessage(): string
+    {
+        $maximumMegabytes = (int) config('instazine.image_upload_kilobytes_max') / 1024;
+
+        return sprintf(
+            'The image was rejected because its file size exceeds the %g MB limit.',
+            $maximumMegabytes,
+        );
     }
 
     private function storeConvertedPicture(\Illuminate\Http\UploadedFile $picture): string

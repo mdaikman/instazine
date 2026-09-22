@@ -38,6 +38,8 @@ class ReporterArticleController extends Controller
                 'max:'.config('instazine.image_upload_kilobytes_max'),
             ],
             'text' => ['nullable', 'string'],
+        ], [
+            'pic.max' => $this->pictureFileSizeMessage(),
         ]);
 
         $newPicture = $request->hasFile('pic')
@@ -107,5 +109,15 @@ class ReporterArticleController extends Controller
         Storage::disk('local')->put($path, $this->imageConverter->convert($picture));
 
         return $path;
+    }
+
+    private function pictureFileSizeMessage(): string
+    {
+        $maximumMegabytes = (int) config('instazine.image_upload_kilobytes_max') / 1024;
+
+        return sprintf(
+            'The image was rejected because its file size exceeds the %g MB limit.',
+            $maximumMegabytes,
+        );
     }
 }

@@ -105,7 +105,10 @@
     <form method="post" action="{{ route('admin.articles.store') }}" enctype="multipart/form-data">
         @csrf
         <h3>Create new article</h3>
-        @include('admin.partials.article-form', ['article' => null])
+        @include('admin.partials.article-form', [
+            'article' => null,
+            'formKey' => 'create-article',
+        ])
         <div class="article-form-actions">
             <button type="button" id="close-create-article-modal">Cancel</button>
             <button type="submit">Create</button>
@@ -119,7 +122,10 @@
         @csrf
         @method('PUT')
         <h3>Edit article</h3>
-        @include('admin.partials.article-form', ['article' => $article])
+        @include('admin.partials.article-form', [
+            'article' => $article,
+            'formKey' => 'edit-article-'.$article->A_id,
+        ])
         <div class="article-form-actions">
             <button type="button" data-close-modal="edit-article-modal-{{ $article->A_id }}">Cancel</button>
             <button type="submit">Save</button>
@@ -187,6 +193,12 @@
 
     .article-modal .article-form-actions {
         padding: 5px;
+    }
+
+    .article-modal .article-form-error {
+        grid-column: 2;
+        color: #b00020;
+        margin: 0;
     }
 
     .article-picture {
@@ -264,6 +276,10 @@
         .article-modal textarea {
             max-width: 100%;
         }
+
+        .article-modal .article-form-error {
+            grid-column: 1;
+        }
     }
 </style>
 @endpush
@@ -271,6 +287,7 @@
 @push('scripts')
 <script>
     const createArticleModal = document.querySelector('#create-article-modal');
+    const failedArticleForm = @json(old('_article_form'));
 
     document.querySelector('#open-create-article-modal').addEventListener('click', () => {
         createArticleModal.showModal();
@@ -279,6 +296,12 @@
     document.querySelector('#close-create-article-modal').addEventListener('click', () => {
         createArticleModal.close();
     });
+
+    if (failedArticleForm === 'create-article') {
+        createArticleModal.showModal();
+    } else if (failedArticleForm?.startsWith('edit-article-')) {
+        document.querySelector(`#${failedArticleForm.replace('edit-article-', 'edit-article-modal-')}`)?.showModal();
+    }
 
     document.querySelectorAll('[data-edit-modal]').forEach((button) => {
         button.addEventListener('click', () => {
@@ -313,10 +336,18 @@
     const userTimeZone = Intl.DateTimeFormat().resolvedOptions().timeZone;
 
     document.querySelectorAll('.article-timezone').forEach((input) => {
+        if (input.dataset.restoreOld === 'true') {
+            return;
+        }
+
         input.value = userTimeZone;
     });
 
     document.querySelectorAll('.article-date-input').forEach((input) => {
+        if (input.value) {
+            return;
+        }
+
         input.value = input.dataset.utcDate ?
             formatLocalDateTimeInput(new Date(input.dataset.utcDate)) :
             formatLocalDateTimeInput(new Date());

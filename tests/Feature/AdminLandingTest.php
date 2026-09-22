@@ -252,6 +252,32 @@ class AdminLandingTest extends TestCase
             ->assertOk();
     }
 
+    public function test_picture_with_too_many_pixels_shows_the_reason_and_keeps_article_fields(): void
+    {
+        config()->set('instazine.image_source_pixels_max', 99);
+        $honcho = User::factory()->create(['level' => UserLevel::Honcho]);
+
+        $response = $this->actingAs($honcho)
+            ->followingRedirects()
+            ->from(route('admin.articles'))
+            ->post(route('admin.articles.store'), [
+                '_article_form' => 'create-article',
+                'headline' => 'Remember this article',
+                'pic' => UploadedFile::fake()->image('too-many-pixels.jpg', 10, 10),
+                'text' => 'Keep this article text.',
+                'author' => $honcho->id,
+                'date' => '2026-08-02T11:00',
+                'timezone' => 'America/Vancouver',
+            ]);
+
+        $response
+            ->assertOk()
+            ->assertSee('The image was rejected because its dimensions are 10 × 10 pixels (100 pixels), exceeding the 99-pixel limit.')
+            ->assertSee('value="Remember this article"', false)
+            ->assertSee('Keep this article text.')
+            ->assertSee('const failedArticleForm = "create-article";', false);
+    }
+
     public function test_honcho_can_toggle_an_article_approval_checkbox(): void
     {
         $honcho = User::factory()->create(['level' => UserLevel::Honcho]);

@@ -1,7 +1,14 @@
+@php
+    $restoreOldInput = old('_article_form') === $formKey;
+    $formErrors = session('errors')?->getBag('default') ?? $errors;
+@endphp
+
+<input type="hidden" name="_article_form" value="{{ $formKey }}">
+
 @if ($article)
     <div class="article-form-field">
         <label>
-            <input type="checkbox" name="approved" value="1" @checked($article->Approved)>
+            <input type="checkbox" name="approved" value="1" @checked($restoreOldInput ? old('approved') : $article->Approved)>
             Approved
         </label>
     </div>
@@ -9,7 +16,7 @@
 
 <div class="article-form-field">
     <label for="article-headline-{{ $article?->A_id ?? 'new' }}">Headline</label>
-    <input id="article-headline-{{ $article?->A_id ?? 'new' }}" type="text" name="headline" maxlength="64" value="{{ $article?->Headline }}">
+    <input id="article-headline-{{ $article?->A_id ?? 'new' }}" type="text" name="headline" maxlength="64" value="{{ $restoreOldInput ? old('headline') : $article?->Headline }}">
 </div>
 
 <div class="article-form-field">
@@ -28,11 +35,14 @@
         name="pic"
         accept="image/jpeg,image/png,image/gif,image/webp,image/avif"
     >
+    @if ($restoreOldInput && $formErrors->has('pic'))
+        <p class="article-form-error" role="alert">{{ $formErrors->first('pic') }}</p>
+    @endif
 </div>
 
 <div class="article-form-field">
     <label for="article-text-{{ $article?->A_id ?? 'new' }}">Text</label>
-    <textarea id="article-text-{{ $article?->A_id ?? 'new' }}" name="text" rows="6">{{ $article?->Text }}</textarea>
+    <textarea id="article-text-{{ $article?->A_id ?? 'new' }}" name="text" rows="6">{{ $restoreOldInput ? old('text') : $article?->Text }}</textarea>
 </div>
 
 @if ($article)
@@ -51,12 +61,19 @@
 @if ($showDate ?? true)
     <div class="article-form-field">
         <label for="article-date-{{ $article?->A_id ?? 'new' }}">Date</label>
-        <input type="hidden" name="timezone" class="article-timezone" value="UTC">
+        <input
+            type="hidden"
+            name="timezone"
+            class="article-timezone"
+            value="{{ $restoreOldInput ? old('timezone', 'UTC') : 'UTC' }}"
+            data-restore-old="{{ $restoreOldInput ? 'true' : 'false' }}"
+        >
         <input
             id="article-date-{{ $article?->A_id ?? 'new' }}"
             class="article-date-input"
             type="datetime-local"
             name="date"
+            value="{{ $restoreOldInput ? old('date') : '' }}"
             data-utc-date="{{ $article?->Date?->toIso8601String() }}"
             required
         >
