@@ -1,0 +1,185 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Push Button Receive Paper</title>
+    <style>
+        * {
+            box-sizing: border-box;
+        }
+
+        body {
+            margin: 0;
+            min-height: 100vh;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            background: #e8e8e3;
+            color: #111;
+            font-family: "Courier New", Courier, monospace;
+        }
+
+        .machine {
+            width: min(90%, 620px);
+            background: #f7f6ef;
+            border: 3px solid #111;
+            padding: 40px;
+            box-shadow: 10px 10px 0 #111;
+            text-align: center;
+        }
+
+        h1 {
+            margin: 0 0 10px;
+            font-size: clamp(2rem, 6vw, 4rem);
+            line-height: 0.95;
+            text-transform: uppercase;
+            letter-spacing: -2px;
+        }
+
+        .subtitle {
+            margin: 0 0 40px;
+            font-size: 1rem;
+            text-transform: uppercase;
+            letter-spacing: 2px;
+        }
+
+        .button-panel {
+            display: flex;
+            flex-wrap: wrap;
+            justify-content: center;
+            gap: 35px;
+        }
+
+        .button {
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            width: 180px;
+            height: 180px;
+            border-radius: 50%;
+            border: 8px solid #222;
+            background: #d83a2e;
+            color: white;
+            font-family: inherit;
+            font-size: 1.4rem;
+            font-weight: bold;
+            text-transform: uppercase;
+            cursor: pointer;
+            box-shadow: 0 10px 0 #741b15, 0 14px 0 #111;
+            transition: transform 0.08s, box-shadow 0.08s;
+        }
+
+        .button:active {
+            transform: translateY(10px);
+            box-shadow: 0 0 0 #741b15, 0 4px 0 #111;
+        }
+
+        .button:disabled {
+            background: #777;
+            color: #ddd;
+            cursor: not-allowed;
+            box-shadow: 0 10px 0 #444, 0 14px 0 #111;
+            opacity: 0.75;
+        }
+
+        .button:disabled:active {
+            transform: none;
+            box-shadow: 0 10px 0 #444, 0 14px 0 #111;
+        }
+
+        .instructions {
+            margin: 45px auto 0;
+            max-width: 400px;
+            padding-top: 20px;
+            border-top: 2px dashed #111;
+            font-size: 0.9rem;
+            line-height: 1.6;
+        }
+
+        .status {
+            display: inline-block;
+            margin-top: 25px;
+            padding: 8px 12px;
+            border: 1px solid #111;
+            background: white;
+            font-size: 0.8rem;
+            text-transform: uppercase;
+        }
+
+        footer {
+            margin-top: 35px;
+            font-size: 0.7rem;
+            opacity: 0.65;
+        }
+
+        @media (max-width: 500px) {
+            .machine {
+                padding: 30px 20px;
+            }
+
+            .button-panel {
+                gap: 30px;
+            }
+
+            .button {
+                width: 150px;
+                height: 150px;
+            }
+        }
+    </style>
+</head>
+<body>
+    <main class="machine">
+        <h1>Push Button<br>Receive Paper</h1>
+        <p class="subtitle">Information made physical</p>
+
+        <div class="button-panel">
+            <button class="button" id="printButton" type="button">Push</button>
+            <button
+                class="button"
+                id="storiesButton"
+                type="button"
+                data-destination="/stories"
+                disabled
+                aria-describedby="storiesStatus"
+            >Stories</button>
+        </div>
+
+        <div class="instructions">
+            Press the button.<br>
+            Something will be selected.<br>
+            Something will be printed.<br>
+            You may keep the paper.
+        </div>
+
+        <div class="status" id="status">Printer Ready</div>
+        <span id="storiesStatus" hidden>Stories are not currently available.</span>
+
+        <footer>PUSH BUTTON RECEIVE PAPER // SYSTEM 001</footer>
+    </main>
+
+    <script>
+        const printButton = document.getElementById("printButton");
+        const storiesButton = document.getElementById("storiesButton");
+        const status = document.getElementById("status");
+
+        printButton.addEventListener("click", () => {
+            status.textContent = "Requesting Paper...";
+
+            // Placeholder for your API call.
+            setTimeout(() => {
+                status.textContent = "Sending you to some paper...";
+
+                setTimeout(() => {
+                    window.location.href = "/blog";
+                }, 1000);
+            }, 1200);
+        });
+
+        storiesButton.addEventListener("click", () => {
+            window.location.href = storiesButton.dataset.destination;
+        });
+    </script>
+</body>
+</html>

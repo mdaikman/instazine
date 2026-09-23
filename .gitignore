@@ -27,10 +27,10 @@ Thumbs.db
 
 # JavaScript dependencies and Vite output
 /node_modules/
-/public/build/
-/public/fonts-manifest.dev.json
-/public/hot
-/public/storage
+/server/stories/build/
+/server/stories/fonts-manifest.dev.json
+/server/stories/hot
+/server/stories/storage
 
 # ESP-IDF dependencies, builds, and machine-local configuration
 /__ESP32/build/
