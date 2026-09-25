@@ -7,6 +7,7 @@ return [
     'articles' => (int) env('INSTAZINE_ARTICLES', 1),
     'middles' => (int) env('INSTAZINE_MIDDLES', 0),
     'footers' => (int) env('INSTAZINE_FOOTERS', 0),
+    'reporter_password' => env('INSTAZINE_REPORTER_PASSWORD'),
     'banner' => env('INSTAZINE_BANNER', 'storage/app/private/banners/nada.png'),
     'dividers' => [
         env('INSTAZINE_DIVIDER_A'),
