@@ -13,6 +13,10 @@ class PictureController extends Controller
     {
         $path = $request->query('url');
 
+        if (is_string($path) && str_starts_with($path, 'storage/app/private/')) {
+            $path = substr($path, strlen('storage/app/private/'));
+        }
+
         if (! $this->isSafeRelativeBmpPath($path) || ! Storage::disk('local')->exists($path)) {
             return $this->json(null);
         }

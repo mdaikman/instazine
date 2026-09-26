@@ -58,6 +58,27 @@ class PictureTest extends TestCase
         }
     }
 
+    public function test_it_accepts_the_legacy_private_storage_prefix(): void
+    {
+        Storage::fake('local');
+        $image = imagecreatetruecolor(1, 1);
+        imagefill($image, 0, 0, imagecolorallocate($image, 0, 0, 0));
+
+        ob_start();
+        imagebmp($image, null, true);
+        $contents = ob_get_clean();
+        imagedestroy($image);
+        Storage::disk('local')->put('banners/example.bmp', $contents);
+
+        $this->getJson('/api/pic?url=storage%2Fapp%2Fprivate%2Fbanners%2Fexample.bmp')
+            ->assertOk()
+            ->assertExactJson([
+                'height' => 1,
+                'width' => 1,
+                'pixels' => [128],
+            ]);
+    }
+
     public function test_it_returns_json_null_when_the_file_is_not_a_valid_bmp(): void
     {
         Storage::fake('local');
