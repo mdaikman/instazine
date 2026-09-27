@@ -3,9 +3,8 @@
 namespace Tests\Feature\Api;
 
 use Illuminate\Support\Facades\Storage;
-use Tests\TestCase;
 
-class PictureTest extends TestCase
+class PictureTest extends ApiTestCase
 {
     public function test_it_returns_bmp_dimensions_and_packed_one_bit_pixels(): void
     {

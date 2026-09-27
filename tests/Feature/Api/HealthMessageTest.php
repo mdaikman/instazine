@@ -5,9 +5,8 @@ namespace Tests\Feature\Api;
 use Illuminate\Database\Schema\Blueprint;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Schema;
-use Tests\TestCase;
 
-class HealthMessageTest extends TestCase
+class HealthMessageTest extends ApiTestCase
 {
     use RefreshDatabase;
 

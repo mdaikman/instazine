@@ -4,12 +4,13 @@
 // Copy this file to settings.h and fill in values for your local environment.
 #define WIFI_SSID "your-wifi-name"
 #define WIFI_PASSWORD "your-wifi-password"
+#define API_TOKEN "your-board-api-token"
 #define DEVICE_HOSTNAME "instazine"
 #define BASE_DOMAIN "http://your-server"
 #define BASE_PORT "8000"
-#define CONTENT_API_ROUTE "/api/content"
-#define PIC_API_ROUTE "/api/pic"
-#define PING_API_ROUTE "/api/ping"
+#define CONTENT_API_ROUTE "/stories/api/content"
+#define PIC_API_ROUTE "/stories/api/pic"
+#define PING_API_ROUTE "/stories/api/ping"
 #define OK_PHRASE "The Italian explorer has reached the new world"
 #define PRINTER_USB_VENDOR_ID 0x28E9
 #define PRINTER_USB_PRODUCT_ID 0x0289

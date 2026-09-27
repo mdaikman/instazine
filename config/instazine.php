@@ -8,6 +8,10 @@ return [
     'middles' => (int) env('INSTAZINE_MIDDLES', 0),
     'footers' => (int) env('INSTAZINE_FOOTERS', 0),
     'reporter_password' => env('INSTAZINE_REPORTER_PASSWORD'),
+    'api_token_hashes' => [
+        env('INSTAZINE_BOARD_API_TOKEN_HASH'),
+        env('INSTAZINE_POSTMAN_API_TOKEN_HASH'),
+    ],
     'banner' => env('INSTAZINE_BANNER', 'storage/app/private/banners/nada.png'),
     'dividers' => [
         env('INSTAZINE_DIVIDER_A'),

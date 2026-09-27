@@ -15,6 +15,7 @@ $app = Application::configure(basePath: dirname(__DIR__))
     ->withMiddleware(function (Middleware $middleware): void {
         $middleware->encryptCookies(except: ['instazine_timezone']);
         $middleware->alias([
+            'api.token' => \App\Http\Middleware\AuthenticateApiToken::class,
             'level' => \App\Http\Middleware\EnsureUserHasLevel::class,
         ]);
     })

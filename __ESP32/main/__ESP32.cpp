@@ -424,6 +424,7 @@ static std::string url_encode_query_value(const std::string &value)
 
 static bool http_get(const std::string &url, http_response_t &response)
 {
+    static constexpr char authorization[] = "Bearer " API_TOKEN;
     const bool is_https = url.compare(0, 8, "https://") == 0;
     esp_http_client_config_t config = {};
     config.url = url.c_str();
@@ -439,6 +440,8 @@ static bool http_get(const std::string &url, http_response_t &response)
         return false;
     }
 
+    esp_http_client_set_header(client, "Authorization", authorization);
+
     const esp_err_t result = esp_http_client_perform(client);
     const int status = result == ESP_OK
                            ? esp_http_client_get_status_code(client)
@@ -449,6 +452,7 @@ static bool http_get(const std::string &url, http_response_t &response)
 
 static bool post_ping_message(const char *message)
 {
+    static constexpr char authorization[] = "Bearer " API_TOKEN;
     static constexpr char ping_api_url[] =
         BASE_DOMAIN ":" BASE_PORT PING_API_ROUTE;
     if (message == nullptr)
@@ -496,6 +500,7 @@ static bool post_ping_message(const char *message)
     }
 
     esp_http_client_set_header(client, "Content-Type", "application/json");
+    esp_http_client_set_header(client, "Authorization", authorization);
     esp_err_t result = esp_http_client_open(client, body_length);
     if (result == ESP_OK)
     {
@@ -1109,6 +1114,7 @@ static esp_err_t http_event_handler(esp_http_client_event_t *event)
 
 static void fetch_content()
 {
+    static constexpr char authorization[] = "Bearer " API_TOKEN;
     http_response_t response;
     static constexpr char content_api_url[] =
         BASE_DOMAIN ":" BASE_PORT CONTENT_API_ROUTE;
@@ -1129,6 +1135,8 @@ static void fetch_content()
         report_error("Unable to initialize content HTTP client");
         return;
     }
+
+    esp_http_client_set_header(client, "Authorization", authorization);
 
     const esp_err_t result = esp_http_client_perform(client);
     const int status_code = result == ESP_OK

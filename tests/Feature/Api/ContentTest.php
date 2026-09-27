@@ -8,9 +8,8 @@ use App\Models\Tracking;
 use Illuminate\Database\Schema\Blueprint;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Schema;
-use Tests\TestCase;
 
-class ContentTest extends TestCase
+class ContentTest extends ApiTestCase
 {
     use RefreshDatabase;
 
