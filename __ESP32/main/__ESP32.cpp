@@ -39,8 +39,11 @@ static constexpr gpio_num_t ARCADE_LED_PIN = GPIO_NUM_5;
 static constexpr char CONTENT_DIVIDER[] =
     "-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=\r\n";
 static TaskHandle_t content_request_task_handle;
+static TaskHandle_t image_preload_task_handle;
 static std::atomic<bool> led_cycle_enabled{true};
 static std::atomic<bool> wifi_connected{false};
+static std::atomic<bool> picture_cache_ready{false};
+static std::atomic<bool> picture_cache_manifest_loaded{false};
 
 struct retained_failure_t
 {
@@ -117,6 +120,17 @@ struct http_response_t
     char *data = nullptr;
     size_t length = 0;
 };
+
+struct cached_picture_t
+{
+    std::string url;
+    size_t width = 0;
+    size_t height = 0;
+    std::vector<uint8_t> pixels;
+};
+
+static std::vector<cached_picture_t> picture_cache;
+static std::vector<std::string> picture_cache_targets;
 
 static bool get_string(const cJSON *object, const char *key,
                        std::string &destination)
@@ -703,29 +717,22 @@ static bool parse_picture_json_in_place(char *json, size_t json_size,
     return false;
 }
 
-static bool print_pic_to_printer(const std::string &pic_url)
+static bool retrieve_picture(const std::string &pic_url, size_t &width,
+                             size_t &height, std::vector<uint8_t> &pixels)
 {
-    if (!has_relative_bmp_url(pic_url))
-    {
-        return false;
-    }
-
     const std::string request_url =
         BASE_DOMAIN ":" BASE_PORT PIC_API_ROUTE "?url=" +
         url_encode_query_value(pic_url);
-    size_t width = 0;
-    size_t height = 0;
-    uint8_t *source = nullptr;
-    size_t source_size = 0;
-    char *pixel_storage = nullptr;
     static constexpr unsigned max_attempts = 4; // Initial + 3 retries.
-    bool decoded = false;
+
     for (unsigned attempt = 1; attempt <= max_attempts; ++attempt)
     {
         std::printf("Retrieving picture (attempt %u/%u): %s\n",
                     attempt, max_attempts, pic_url.c_str());
         http_response_t response;
         const bool retrieved = http_get(request_url, response);
+        bool decoded = false;
+
         if (retrieved && response.data != nullptr && response.length != 0)
         {
             const char *response_start = response.data;
@@ -738,23 +745,20 @@ static bool print_pic_to_printer(const std::string &pic_url)
                 return false;
             }
 
+            uint8_t *source = nullptr;
+            size_t source_size = 0;
             width = 0;
             height = 0;
-            source = nullptr;
-            source_size = 0;
             decoded = parse_picture_json_in_place(
                 response.data, response.length, width, height, source,
                 source_size);
             if (decoded)
-            {
-                pixel_storage = response.data;
-                response.data = nullptr;
-            }
+                pixels.assign(source, source + source_size);
         }
         std::free(response.data);
 
         if (decoded)
-            break;
+            return true;
 
         if (attempt < max_attempts)
         {
@@ -763,12 +767,121 @@ static bool print_pic_to_printer(const std::string &pic_url)
             vTaskDelay(pdMS_TO_TICKS(250));
         }
     }
-    if (!decoded)
+
+    return false;
+}
+
+static const cached_picture_t *find_cached_picture(const std::string &url)
+{
+    for (const cached_picture_t &picture : picture_cache)
+    {
+        if (picture.url == url)
+            return &picture;
+    }
+
+    return nullptr;
+}
+
+static bool cache_picture(const std::string &url)
+{
+    if (find_cached_picture(url) != nullptr)
+        return true;
+
+    cached_picture_t picture;
+    picture.url = url;
+    if (!retrieve_picture(picture.url, picture.width, picture.height,
+                          picture.pixels))
+        return false;
+
+    std::printf("Cached picture: %s (%ux%u)\n", picture.url.c_str(),
+                static_cast<unsigned>(picture.width),
+                static_cast<unsigned>(picture.height));
+    picture_cache.emplace_back(std::move(picture));
+    return true;
+}
+
+static bool picture_cache_is_complete()
+{
+    if (!picture_cache_manifest_loaded.load())
+        return false;
+
+    if (picture_cache_targets.empty())
+        return true;
+
+    for (const std::string &url : picture_cache_targets)
+    {
+        if (find_cached_picture(url) == nullptr)
+            return false;
+    }
+
+    return true;
+}
+
+static bool preload_configured_pictures();
+
+static void retry_missing_cached_pictures()
+{
+    if (picture_cache_ready.load())
+        return;
+
+    if (!picture_cache_manifest_loaded.load())
+    {
+        std::printf("Retrying picture asset manifest\n");
+        const bool cache_ready = preload_configured_pictures();
+        picture_cache_ready.store(cache_ready);
+        std::printf("Button LED %s\n",
+                    cache_ready ? "enabled; picture cache is ready"
+                                : "held off; picture cache is incomplete");
+        std::fflush(stdout);
+        return;
+    }
+
+    std::printf("Retrying missing cached pictures\n");
+    for (const std::string &url : picture_cache_targets)
+    {
+        if (find_cached_picture(url) == nullptr && !cache_picture(url))
+            std::printf("Picture remains uncached: %s\n", url.c_str());
+    }
+
+    if (picture_cache_is_complete())
+    {
+        picture_cache_ready.store(true);
+        std::printf("Button LED enabled; picture cache is ready\n");
+    }
+    else
+    {
+        std::printf("Button LED held off; picture cache is incomplete\n");
+    }
+    std::fflush(stdout);
+}
+
+static bool print_pic_to_printer(const std::string &pic_url)
+{
+    if (!has_relative_bmp_url(pic_url))
+    {
+        return false;
+    }
+
+    size_t width = 0;
+    size_t height = 0;
+    std::vector<uint8_t> downloaded_pixels;
+    const cached_picture_t *cached = find_cached_picture(pic_url);
+    if (cached != nullptr)
+    {
+        width = cached->width;
+        height = cached->height;
+        std::printf("Using cached picture: %s\n", pic_url.c_str());
+    }
+    else if (!retrieve_picture(pic_url, width, height, downloaded_pixels))
     {
         report_error("Unable to retrieve or decode picture after 3 retries: %s",
                      pic_url.c_str());
         return false;
     }
+    const std::vector<uint8_t> &pixels =
+        cached != nullptr ? cached->pixels : downloaded_pixels;
+    const uint8_t *source = pixels.data();
+    const size_t source_size = pixels.size();
     std::printf("Decoded picture: %ux%u pixels\n",
                 static_cast<unsigned>(width),
                 static_cast<unsigned>(height));
@@ -787,7 +900,6 @@ static bool print_pic_to_printer(const std::string &pic_url)
         {
             report_error("Not enough memory to center picture: %s",
                          pic_url.c_str());
-            std::free(pixel_storage);
             return false;
         }
         const size_t left_padding = (PRINTER_PIXEL_WIDTH - width) / 2;
@@ -825,7 +937,6 @@ static bool print_pic_to_printer(const std::string &pic_url)
                       raster_size) &&
         printer_write("\r\n", 2);
     std::free(centered);
-    std::free(pixel_storage);
     if (!print_succeeded)
     {
         report_error("Unable to send picture to printer: %s",
@@ -834,6 +945,77 @@ static bool print_pic_to_printer(const std::string &pic_url)
     }
     std::printf("Printed picture: %s\n", pic_url.c_str());
     return true;
+}
+
+static bool preload_configured_pictures()
+{
+    static constexpr char asset_api_url[] =
+        BASE_DOMAIN ":" BASE_PORT ASSET_API_ROUTE;
+    http_response_t response;
+
+    std::printf("Preloading configured banner and divider pictures\n");
+    if (!http_get(asset_api_url, response) || response.data == nullptr)
+    {
+        std::free(response.data);
+        report_error("Unable to retrieve picture asset manifest");
+        return false;
+    }
+
+    cJSON *root = cJSON_ParseWithLength(response.data, response.length);
+    const cJSON *images = root != nullptr
+                              ? cJSON_GetObjectItemCaseSensitive(root, "images")
+                              : nullptr;
+    if (!cJSON_IsArray(images))
+    {
+        cJSON_Delete(root);
+        std::free(response.data);
+        report_error("Picture asset manifest is invalid");
+        return false;
+    }
+    picture_cache_manifest_loaded.store(true);
+
+    static constexpr size_t max_cached_pictures = 8;
+    bool all_loaded = true;
+    const cJSON *image = nullptr;
+    cJSON_ArrayForEach(image, images)
+    {
+        if (picture_cache_targets.size() >= max_cached_pictures)
+        {
+            all_loaded = false;
+            break;
+        }
+        if (!cJSON_IsString(image) || image->valuestring == nullptr)
+            continue;
+
+        const std::string url = image->valuestring;
+        if (!has_relative_bmp_url(url))
+            continue;
+
+        bool already_targeted = false;
+        for (const std::string &target : picture_cache_targets)
+        {
+            if (target == url)
+            {
+                already_targeted = true;
+                break;
+            }
+        }
+        if (already_targeted)
+            continue;
+
+        picture_cache_targets.push_back(url);
+        if (!cache_picture(url))
+        {
+            all_loaded = false;
+            report_error("Unable to preload picture: %s", url.c_str());
+        }
+    }
+
+    cJSON_Delete(root);
+    std::free(response.data);
+    std::printf("Picture preload complete: %u cached\n",
+                static_cast<unsigned>(picture_cache.size()));
+    return all_loaded && picture_cache_is_complete();
 }
 
 static void append_wrapped_printer_line(std::string &document,
@@ -1114,6 +1296,8 @@ static esp_err_t http_event_handler(esp_http_client_event_t *event)
 
 static void fetch_content()
 {
+    retry_missing_cached_pictures();
+
     static constexpr char authorization[] = "Bearer " API_TOKEN;
     http_response_t response;
     static constexpr char content_api_url[] =
@@ -1234,6 +1418,28 @@ static void button_task(void *argument)
     }
 }
 
+static void image_preload_task(void *argument)
+{
+    const bool cache_ready = preload_configured_pictures();
+    picture_cache_ready.store(cache_ready);
+    std::printf("Button LED %s\n",
+                cache_ready ? "enabled; picture cache is ready"
+                            : "held off; picture cache is incomplete");
+    std::fflush(stdout);
+
+    if (content_request_task_handle == nullptr)
+    {
+        const BaseType_t created =
+            xTaskCreate(button_task, "button", 6144, nullptr,
+                        5, &content_request_task_handle);
+        if (created != pdPASS)
+            report_error("Unable to create HTTP request task");
+    }
+
+    image_preload_task_handle = nullptr;
+    vTaskDelete(nullptr);
+}
+
 static void arcade_led_task(void *argument)
 {
     int brightness = 0;
@@ -1242,7 +1448,7 @@ static void arcade_led_task(void *argument)
 
     while (true)
     {
-        if (!led_cycle_enabled.load())
+        if (!picture_cache_ready.load() || !led_cycle_enabled.load())
         {
             was_cycling = false;
             vTaskDelay(pdMS_TO_TICKS(10));
@@ -1347,14 +1553,15 @@ static void wifi_event_handler(void *arg, esp_event_base_t event_base,
                 post_ping_message(reset_message);
         }
 
-        if (content_request_task_handle == nullptr)
+        if (content_request_task_handle == nullptr &&
+            image_preload_task_handle == nullptr)
         {
             const BaseType_t created =
-                xTaskCreate(button_task, "button", 6144, nullptr,
-                            5, &content_request_task_handle);
+                xTaskCreate(image_preload_task, "image_preload", 8192, nullptr,
+                            5, &image_preload_task_handle);
             if (created != pdPASS)
             {
-                report_error("Unable to create HTTP request task");
+                report_error("Unable to create picture preload task");
             }
         }
     }

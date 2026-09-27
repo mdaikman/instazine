@@ -1,6 +1,7 @@
 <?php
 
 use App\Models\Health;
+use App\Http\Controllers\Api\AssetController;
 use App\Http\Controllers\Api\HealthController;
 use App\Http\Controllers\Api\ContentController;
 use App\Http\Controllers\Api\PictureController;
@@ -17,6 +18,7 @@ Route::middleware('api.token')->group(function (): void {
     });
 
     Route::post('/ping', [HealthController::class, 'store']);
+    Route::get('/assets', [AssetController::class, 'index']);
     Route::get('/content', [ContentController::class, 'index']);
     Route::get('/pic', [PictureController::class, 'show']);
 });

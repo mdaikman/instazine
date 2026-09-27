@@ -9,6 +9,7 @@
 #define BASE_DOMAIN "http://your-server"
 #define BASE_PORT "8000"
 #define CONTENT_API_ROUTE "/stories/api/content"
+#define ASSET_API_ROUTE "/stories/api/assets"
 #define PIC_API_ROUTE "/stories/api/pic"
 #define PING_API_ROUTE "/stories/api/ping"
 #define OK_PHRASE "The Italian explorer has reached the new world"
