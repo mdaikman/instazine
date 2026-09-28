@@ -50,7 +50,7 @@
             <td style='text-align: center;'>
                 <form method="post" action="{{ route('admin.articles.approval', $article) }}">
                     @csrf
-                    @method(' PATCH')
+                    @method('PATCH')
                     <input type="hidden" name="approved" value="0">
                     <input
                         type="checkbox"

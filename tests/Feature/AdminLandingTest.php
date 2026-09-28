@@ -591,4 +591,30 @@ class AdminLandingTest extends TestCase
             ->assertSee(route('admin.articles.picture', $article), false)
             ->assertSee('article-picture', false);
     }
+
+    public function test_approval_toggle_form_overrides_the_method_to_patch(): void
+    {
+        $honcho = User::factory()->create(['level' => UserLevel::Honcho]);
+        $article = Article::query()->create([
+            'Approved' => false,
+            'Headline' => 'Pending headline',
+            'Author' => $honcho->id,
+            'Date' => '2026-08-02 09:00:00',
+        ]);
+
+        $this->actingAs($honcho)
+            ->get('/admin/articles')
+            ->assertOk()
+            ->assertSee(route('admin.articles.approval', $article), false)
+            ->assertSee('<input type="hidden" name="_method" value="PATCH">', false);
+
+        $this->actingAs($honcho)
+            ->post(route('admin.articles.approval', $article), [
+                '_method' => 'PATCH',
+                'approved' => '1',
+            ])
+            ->assertRedirect(route('admin.articles'));
+
+        $this->assertTrue($article->fresh()->Approved);
+    }
 }
