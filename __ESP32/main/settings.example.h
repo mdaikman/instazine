@@ -17,5 +17,6 @@
 #define PRINTER_USB_PRODUCT_ID 0x0289
 #define PRINTER_CODE_PAGE 16 // Common ESC/POS value for Windows-1252
 #define PRINTER_PIXEL_WIDTH 576
+#define REFRESH_SECONDS 5 // Cooldown after a print before the button works again
 
 #endif /* INSTAZINE_SETTINGS_H */

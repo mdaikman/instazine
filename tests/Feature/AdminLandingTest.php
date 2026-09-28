@@ -8,8 +8,6 @@ use App\Models\RandomText;
 use App\Models\Health;
 use App\Models\Article;
 use App\Models\Tracking;
-use Illuminate\Database\Schema\Blueprint;
-use Illuminate\Support\Facades\Schema;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Hash;
 use Illuminate\Support\Facades\Storage;
@@ -20,43 +18,6 @@ use Tests\TestCase;
 class AdminLandingTest extends TestCase
 {
     use RefreshDatabase;
-
-    protected function setUp(): void
-    {
-        parent::setUp();
-
-        Schema::create('Random_text', function (Blueprint $table) {
-            $table->id('R_id');
-            $table->string('Type', 16);
-            $table->string('Random_text', 255);
-            $table->timestamps();
-        });
-
-        Schema::create('Health', function (Blueprint $table) {
-            $table->id('H_id');
-            $table->dateTime('Date')->nullable();
-            $table->text('Message')->nullable();
-            $table->timestamps();
-        });
-
-        Schema::create('Article', function (Blueprint $table) {
-            $table->id('A_id');
-            $table->dateTime('Date');
-            $table->unsignedBigInteger('Author');
-            $table->string('Headline', 64)->nullable();
-            $table->text('Pic')->nullable();
-            $table->boolean('Approved')->default(false);
-            $table->text('Text')->nullable();
-            $table->timestamps();
-        });
-
-        Schema::create('Tracking', function (Blueprint $table) {
-            $table->id('T_id');
-            $table->unsignedBigInteger('A_id')->nullable();
-            $table->unsignedBigInteger('R_id')->nullable();
-            $table->timestamps();
-        });
-    }
 
     public function test_honcho_login_redirects_to_articles(): void
     {
