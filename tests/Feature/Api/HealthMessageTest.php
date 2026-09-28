@@ -2,25 +2,11 @@
 
 namespace Tests\Feature\Api;
 
-use Illuminate\Database\Schema\Blueprint;
 use Illuminate\Foundation\Testing\RefreshDatabase;
-use Illuminate\Support\Facades\Schema;
 
 class HealthMessageTest extends ApiTestCase
 {
     use RefreshDatabase;
-
-    protected function setUp(): void
-    {
-        parent::setUp();
-
-        Schema::create('Health', function (Blueprint $table) {
-            $table->id('H_id');
-            $table->dateTime('Date')->nullable();
-            $table->text('Message')->nullable();
-            $table->timestamps();
-        });
-    }
 
     public function test_json_message_is_sanitized_and_saved_to_health(): void
     {
