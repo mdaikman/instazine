@@ -9,7 +9,7 @@ use Illuminate\Support\Facades\Route;
 Route::view('/', 'home')->middleware('level:buttonpusher')->name('home');
 
 Route::view('/login', 'login')->middleware('level:buttonpusher')->name('login');
-Route::post('/login', [LoginController::class, 'store'])->middleware('level:buttonpusher')->name('login.attempt');
+Route::post('/login', [LoginController::class, 'store'])->middleware(['level:buttonpusher', 'throttle:10,1'])->name('login.attempt');
 Route::post('/logout', [LoginController::class, 'destroy'])->middleware('auth')->name('logout');
 
 Route::redirect('/admin', '/admin/articles')->middleware('level:honcho')->name('admin');

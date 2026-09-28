@@ -4,6 +4,7 @@ namespace App\Http\Controllers;
 
 use App\Models\Article;
 use App\Services\DitheredImageConverter;
+use App\Support\PrinterText;
 use Illuminate\Support\Carbon;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
@@ -167,8 +168,8 @@ class ArticleController extends Controller
 
         return [
             'Approved' => $request->boolean('approved'),
-            'Headline' => $validated['headline'],
-            'Text' => $validated['text'],
+            'Headline' => PrinterText::clean($validated['headline']),
+            'Text' => PrinterText::clean($validated['text']),
             'Author' => $validated['author'],
             'Date' => Carbon::parse($validated['date'], $validated['timezone'])->utc(),
         ];

@@ -3,6 +3,7 @@
 namespace App\Http\Controllers;
 
 use App\Models\RandomText;
+use App\Support\PrinterText;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Illuminate\View\View;
@@ -86,9 +87,12 @@ class RandomTextController extends Controller
      */
     private function validatedText(Request $request): array
     {
-        return $request->validate([
+        $validated = $request->validate([
             'type' => ['required', Rule::in(['HEADER', 'MID', 'FOOTER'])],
             'text' => ['required', 'string', 'max:255'],
         ]);
+        $validated['text'] = PrinterText::clean($validated['text']);
+
+        return $validated;
     }
 }
