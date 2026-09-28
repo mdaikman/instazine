@@ -93,5 +93,29 @@ __ESP32 subfolder which contains the the .cpp and related files to flash to the 
 ```
 
 
+## Setup (CMS)
+Requires PHP 8.4+ with the GD extension (JPEG, WebP and AVIF support for uploads).
+
+```
+composer install
+cp .env.example .env
+php artisan key:generate
+php artisan migrate
+```
+
+In `.env`, set `INSTAZINE_REPORTER_PASSWORD` (reporters cannot log in while it is empty) and the API token hashes. Each hash is the SHA-256 of a token the board or Postman sends as `Authorization: Bearer <token>`:
+```
+php -r 'echo hash("sha256", "your-board-api-token"), PHP_EOL;'
+```
+
+Create the first honcho (admin) account:
+```
+php artisan tinker --execute="App\Models\User::create(['name' => 'admin', 'email' => 'admin@example.com', 'level' => 'honcho', 'password' => 'change-me']);"
+```
+
+For local development, `composer serve-site` serves the site on port 8000.
+
+For the ESP32, copy `__ESP32/main/settings.example.h` to `__ESP32/main/settings.h` and fill in your values; `API_TOKEN` is the plain token whose hash is in `.env`.
+
 UPDATES
 (09-08-20) Expanded README.md and linked to the start of the website blog.

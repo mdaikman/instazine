@@ -5,9 +5,7 @@ namespace Tests\Feature\Api;
 use App\Models\Article;
 use App\Models\RandomText;
 use App\Models\Tracking;
-use Illuminate\Database\Schema\Blueprint;
 use Illuminate\Foundation\Testing\RefreshDatabase;
-use Illuminate\Support\Facades\Schema;
 
 class ContentTest extends ApiTestCase
 {
@@ -17,31 +15,6 @@ class ContentTest extends ApiTestCase
     {
         parent::setUp();
         config()->set('instazine.dividers', []);
-
-        Schema::create('Random_text', function (Blueprint $table) {
-            $table->id('R_id');
-            $table->string('Type', 16);
-            $table->string('Random_text', 255);
-            $table->timestamps();
-        });
-
-        Schema::create('Article', function (Blueprint $table) {
-            $table->id('A_id');
-            $table->dateTime('Date');
-            $table->unsignedBigInteger('Author');
-            $table->string('Headline', 64)->nullable();
-            $table->text('Pic')->nullable();
-            $table->boolean('Approved')->default(false);
-            $table->text('Text')->nullable();
-            $table->timestamps();
-        });
-
-        Schema::create('Tracking', function (Blueprint $table) {
-            $table->id('T_id');
-            $table->unsignedBigInteger('A_id')->nullable();
-            $table->unsignedBigInteger('R_id')->nullable();
-            $table->timestamps();
-        });
     }
 
     public function test_express_mode_returns_ok_status(): void
