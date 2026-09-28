@@ -30,7 +30,7 @@ class PictureTest extends ApiTestCase
             ->assertExactJson([
                 'height' => 2,
                 'width' => 10,
-                'pixels' => [160, 0, 1, 128],
+                'pixels' => base64_encode("\xA0\x00\x01\x80"),
             ]);
 
         $this->assertSame(
@@ -74,7 +74,7 @@ class PictureTest extends ApiTestCase
             ->assertExactJson([
                 'height' => 1,
                 'width' => 1,
-                'pixels' => [128],
+                'pixels' => base64_encode("\x80"),
             ]);
     }
 

@@ -40,7 +40,9 @@ class PictureController extends Controller
             return $this->json([
                 'height' => $height,
                 'width' => $width,
-                'pixels' => $this->packPixels($image, $width, $height),
+                // Base64 is about a third of the size of a JSON number array,
+                // which matters because the ESP32 buffers the whole response.
+                'pixels' => base64_encode($this->packPixels($image, $width, $height)),
             ]);
         } finally {
             imagedestroy($image);
@@ -69,11 +71,10 @@ class PictureController extends Controller
      * Pack rows MSB-first, padding the end of each row with zero bits.
      * Black pixels are 1 and white pixels are 0.
      *
-     * @return list<int>
      */
-    private function packPixels(\GdImage $image, int $width, int $height): array
+    private function packPixels(\GdImage $image, int $width, int $height): string
     {
-        $bytes = [];
+        $bytes = '';
 
         for ($y = 0; $y < $height; $y++) {
             for ($byteX = 0; $byteX < (int) ceil($width / 8); $byteX++) {
@@ -94,7 +95,7 @@ class PictureController extends Controller
                     }
                 }
 
-                $bytes[] = $byte;
+                $bytes .= chr($byte);
             }
         }
 
@@ -105,7 +106,8 @@ class PictureController extends Controller
     {
         $response = $data === null
             ? JsonResponse::fromJsonString('null')
-            : response()->json($data);
+            // The firmware's base64 decoder does not understand JSON's "\/" escape.
+            : response()->json($data, options: JSON_UNESCAPED_SLASHES);
         $response->headers->set('Content-Length', (string) strlen($response->getContent()));
 
         return $response;
