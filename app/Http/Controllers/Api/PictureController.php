@@ -3,6 +3,7 @@
 namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
+use App\Models\Article;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Storage;
@@ -13,11 +14,15 @@ class PictureController extends Controller
     {
         $path = $request->query('url');
 
-        if (is_string($path) && str_starts_with($path, 'storage/app/private/')) {
-            $path = substr($path, strlen('storage/app/private/'));
+        if (is_string($path)) {
+            $path = $this->withoutPrivatePrefix($path);
         }
 
-        if (! $this->isSafeRelativeBmpPath($path) || ! Storage::disk('local')->exists($path)) {
+        if (
+            ! $this->isSafeRelativeBmpPath($path)
+            || ! Storage::disk('local')->exists($path)
+            || ! $this->isPrintable($path)
+        ) {
             return $this->json(null);
         }
 
@@ -45,6 +50,33 @@ class PictureController extends Controller
         } finally {
             imagedestroy($image);
         }
+    }
+
+    private function withoutPrivatePrefix(string $path): string
+    {
+        return str_starts_with($path, 'storage/app/private/')
+            ? substr($path, strlen('storage/app/private/'))
+            : $path;
+    }
+
+    /**
+     * Only serve the configured banner and dividers, or pictures of approved articles.
+     */
+    private function isPrintable(string $path): bool
+    {
+        $configured = array_map(
+            fn (string $configuredPath): string => $this->withoutPrivatePrefix($configuredPath),
+            array_filter(
+                [config('instazine.banner'), ...(array) config('instazine.dividers', [])],
+                static fn (mixed $configuredPath): bool => is_string($configuredPath) && $configuredPath !== '',
+            ),
+        );
+
+        return in_array($path, $configured, true)
+            || Article::query()
+                ->whereIn('Pic', [$path, 'storage/app/private/'.$path])
+                ->where('Approved', true)
+                ->exists();
     }
 
     private function isSafeRelativeBmpPath(mixed $path): bool
