@@ -5,6 +5,7 @@ namespace App\Http\Controllers;
 use App\Enums\UserLevel;
 use App\Models\Article;
 use App\Services\DitheredImageConverter;
+use App\Support\PrinterText;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Storage;
@@ -52,9 +53,9 @@ class ReporterArticleController extends Controller
         try {
             $article = Article::query()->create([
                 'Approved' => false,
-                'Headline' => $validated['headline'],
+                'Headline' => PrinterText::clean($validated['headline']),
                 'Pic' => $newPicture,
-                'Text' => $validated['text'],
+                'Text' => PrinterText::clean($validated['text']),
                 'Author' => $request->user()->id,
                 'Date' => now(),
             ]);

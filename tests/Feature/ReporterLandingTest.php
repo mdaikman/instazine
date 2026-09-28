@@ -269,4 +269,36 @@ class ReporterLandingTest extends TestCase
             ->get('/admin/random-texts')
             ->assertForbidden();
     }
+
+    public function test_reporter_suggestions_have_printer_control_characters_removed(): void
+    {
+        $reporter = User::factory()->create(['level' => UserLevel::Reporter]);
+
+        $this->actingAs($reporter)
+            ->post(route('reporter.suggest-story.store'), [
+                'headline' => "Sneaky\x1b@ headline",
+                'text' => "Line one.\r\nLine\x1d two.",
+            ])
+            ->assertRedirect();
+
+        $article = Article::query()->sole();
+
+        $this->assertSame('Sneaky@ headline', $article->Headline);
+        $this->assertSame("Line one.\nLine two.", $article->Text);
+    }
+
+    public function test_login_attempts_are_throttled(): void
+    {
+        for ($attempt = 1; $attempt <= 10; $attempt++) {
+            $this->post(route('login.attempt'), [
+                'name' => 'someone',
+                'password' => 'wrong-password',
+            ])->assertRedirect();
+        }
+
+        $this->post(route('login.attempt'), [
+            'name' => 'someone',
+            'password' => 'wrong-password',
+        ])->assertTooManyRequests();
+    }
 }
