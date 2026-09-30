@@ -70,7 +70,7 @@
                 <br>
                 <img
                     class="article-picture"
-                    src="{{ route('admin.articles.picture', $article) }}"
+                    src="{{ route('admin.articles.picture', ['article' => $article, 'v' => $article->pictureVersion]) }}"
                     alt="Article picture for {{ $article->Headline }}">
                 @endif
             </td>
@@ -131,6 +131,16 @@
             <button type="submit">Save</button>
         </div>
     </form>
+    <form id="rotate-article-left-{{ $article->A_id }}" method="post" action="{{ route('admin.articles.picture.rotate', $article) }}">
+        @csrf
+        @method('PATCH')
+        <input type="hidden" name="direction" value="left">
+    </form>
+    <form id="rotate-article-right-{{ $article->A_id }}" method="post" action="{{ route('admin.articles.picture.rotate', $article) }}">
+        @csrf
+        @method('PATCH')
+        <input type="hidden" name="direction" value="right">
+    </form>
 </dialog>
 @endforeach
 @endsection
@@ -189,6 +199,13 @@
     .article-modal .article-form-thumbnail {
         width: min(225px, 100%);
         height: auto;
+    }
+
+    .article-modal .article-picture-rotation {
+        grid-column: 2;
+        display: flex;
+        flex-wrap: wrap;
+        gap: 5px;
     }
 
     .article-modal .article-form-actions {

@@ -13,14 +13,51 @@ class DitheredImageConverter
     public function convert(UploadedFile $picture): string
     {
         $source = $this->createImage($picture);
+
+        return $this->convertImage($source);
+    }
+
+    /**
+     * Rotate an existing bitmap and prepare it again for the printer.
+     */
+    public function rotate(string $contents, string $direction): string
+    {
+        $source = @imagecreatefromstring($contents);
+
+        if ($source === false) {
+            throw ValidationException::withMessages([
+                'pic' => 'The existing picture could not be processed.',
+            ]);
+        }
+
+        $degrees = $direction === 'left' ? 90 : -90;
+        $rotated = imagerotate($source, $degrees, 0xffffff);
+        imagedestroy($source);
+
+        if ($rotated === false) {
+            throw ValidationException::withMessages([
+                'pic' => 'The existing picture could not be rotated.',
+            ]);
+        }
+
+        return $this->convertImage($rotated, false);
+    }
+
+    private function convertImage(\GdImage $source, bool $expandToPrinterWidth = true): string
+    {
         $printerWidth = max(1, (int) config('instazine.printer_pixel_width'));
         $maximumHeight = max(1, (int) config('instazine.image_height_max'));
 
         try {
             $sourceWidth = imagesx($source);
             $sourceHeight = imagesy($source);
-            $width = $printerWidth;
+            $width = $expandToPrinterWidth ? $printerWidth : $sourceWidth;
             $height = max(1, (int) round($sourceHeight * $width / $sourceWidth));
+
+            if ($width > $printerWidth) {
+                $width = $printerWidth;
+                $height = max(1, (int) round($sourceHeight * $width / $sourceWidth));
+            }
 
             if ($height > $maximumHeight) {
                 $height = $maximumHeight;

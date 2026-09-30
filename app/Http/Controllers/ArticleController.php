@@ -40,11 +40,14 @@ class ArticleController extends Controller
             ->withQueryString();
 
         $articles->getCollection()->each(function (Article $article): void {
-            $article->setAttribute(
-                'hasPicture',
-                filled($article->Pic)
+            $hasPicture = filled($article->Pic)
                 && Str::startsWith($article->Pic, 'article-pics/')
-                && Storage::disk('local')->exists($article->Pic),
+                && Storage::disk('local')->exists($article->Pic);
+
+            $article->setAttribute('hasPicture', $hasPicture);
+            $article->setAttribute(
+                'pictureVersion',
+                $hasPicture ? Storage::disk('local')->lastModified($article->Pic) : null,
             );
         });
 
@@ -127,6 +130,33 @@ class ArticleController extends Controller
         );
 
         return Storage::disk('local')->response($article->Pic);
+    }
+
+    public function rotatePicture(Request $request, Article $article): RedirectResponse
+    {
+        $validated = $request->validate([
+            'direction' => ['required', 'in:left,right'],
+        ]);
+
+        abort_unless(
+            filled($article->Pic)
+            && Str::startsWith($article->Pic, 'article-pics/')
+            && Storage::disk('local')->exists($article->Pic),
+            404,
+        );
+
+        $rotated = $this->imageConverter->rotate(
+            Storage::disk('local')->get($article->Pic),
+            $validated['direction'],
+        );
+
+        if (! Storage::disk('local')->put($article->Pic, $rotated)) {
+            throw new \RuntimeException('Unable to save the rotated article picture.');
+        }
+
+        return redirect()
+            ->route('admin.articles')
+            ->with('status', sprintf('Picture rotated %s.', $validated['direction']));
     }
 
     public function destroy(Article $article): RedirectResponse

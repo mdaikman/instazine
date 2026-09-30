@@ -18,6 +18,7 @@ Route::post('/admin/articles', [ArticleController::class, 'store'])->middleware(
 Route::put('/admin/articles/{article}', [ArticleController::class, 'update'])->middleware('level:honcho')->name('admin.articles.update');
 Route::patch('/admin/articles/{article}/approval', [ArticleController::class, 'updateApproval'])->middleware('level:honcho')->name('admin.articles.approval');
 Route::get('/admin/articles/{article}/pic', [ArticleController::class, 'picture'])->middleware('level:honcho')->name('admin.articles.picture');
+Route::patch('/admin/articles/{article}/pic/rotate', [ArticleController::class, 'rotatePicture'])->middleware('level:honcho')->name('admin.articles.picture.rotate');
 Route::delete('/admin/articles/{article}', [ArticleController::class, 'destroy'])->middleware('level:honcho')->name('admin.articles.destroy');
 Route::get('/admin/random-texts', [RandomTextController::class, 'index'])->middleware('level:honcho')->name('admin.random-texts');
 Route::post('/admin/random-texts', [RandomTextController::class, 'store'])->middleware('level:honcho')->name('admin.random-texts.store');
