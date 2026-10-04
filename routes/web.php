@@ -6,7 +6,7 @@ use App\Http\Controllers\ArticleController;
 use App\Http\Controllers\ReporterArticleController;
 use Illuminate\Support\Facades\Route;
 
-Route::view('/', 'home')->middleware('level:buttonpusher')->name('home');
+Route::get('/', fn () => auth()->guest() ? view('login') : view('home'))->name('home');
 
 Route::view('/login', 'login')->middleware('level:buttonpusher')->name('login');
 Route::post('/login', [LoginController::class, 'store'])->middleware('level:buttonpusher')->name('login.attempt');

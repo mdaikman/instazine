@@ -12,11 +12,12 @@ class UserLevelTest extends TestCase
 {
     use RefreshDatabase;
 
-    public function test_buttonpusher_routes_are_public(): void
+    public function test_application_root_is_the_login_page_for_guests(): void
     {
         $this->get('/')
             ->assertOk()
-            ->assertSee('Login');
+            ->assertSee('PBRP Login')
+            ->assertSee('name="password"', false);
     }
 
     public function test_reporter_routes_require_a_reporter_or_honcho(): void

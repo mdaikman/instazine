@@ -3,32 +3,36 @@
 @section('title', 'Login')
 
 @section('content')
-    <h2>Login</h2>
+<h2>PBRP Login</h2>
 
-    <form class="login-form" method="post" action="{{ route('login.attempt') }}">
-        @csrf
-        <div class="login-field">
-            <label>
-                Name
-                <input type="text" name="name" value="{{ old('name') }}" autocomplete="username" required>
-            </label>
-        </div>
+<p>
+    To submit your story, choose any username you like and today's password.<br />
+    The username will not be shown unless you include it yourself in the story. <br />
+</p>
+<form class="login-form" method="post" action="{{ route('login.attempt') }}">
+    @csrf
+    <div class="login-field">
+        <label>
+            Name
+            <input type="text" name="name" value="{{ old('name') }}" autocomplete="username" required>
+        </label>
+    </div>
 
-        @error('name')
-            <p>{{ $message }}</p>
-        @enderror
+    @error('name')
+    <p>{{ $message }}</p>
+    @enderror
 
-        <div class="login-field">
-            <label>
-                Password
-                <input type="password" name="password" autocomplete="current-password" required>
-            </label>
-        </div>
+    <div class="login-field">
+        <label>
+            Password
+            <input type="password" name="password" autocomplete="current-password" required>
+        </label>
+    </div>
 
-        <div class="login-actions">
-            <button type="submit">Log in</button>
-        </div>
-    </form>
+    <div class="login-actions">
+        <button type="submit">Log in</button>
+    </div>
+</form>
 @endsection
 
 @push('styles')

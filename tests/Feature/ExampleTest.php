@@ -15,12 +15,12 @@ class ExampleTest extends TestCase
         $response = $this->get('/');
 
         $response->assertOk()
-            ->assertSee('Push Button 👉 Receive Paper')
+            ->assertSee('PBRP Login')
+            ->assertSee('name="password"', false)
             ->assertSee("url('".asset('images/textures/banner-paper-blue.webp')."')", false)
             ->assertSee("url('".asset('images/textures/sidebar-paper-green.webp')."')", false)
             ->assertSee("url('".asset('images/textures/main-washi-paper.webp')."')", false)
             ->assertSee('aria-controls="main-menu-panel"', false)
-            ->assertSee('aria-label="Close menu"', false)
-            ->assertSee('Login');
+            ->assertSee('aria-label="Close menu"', false);
     }
 }
