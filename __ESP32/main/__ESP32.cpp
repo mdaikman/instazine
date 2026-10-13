@@ -19,6 +19,7 @@
 #include "esp_heap_caps.h"
 #include "esp_log.h"
 #include "esp_netif.h"
+#include "esp_psram.h"
 #include "esp_system.h"
 #include "esp_wifi.h"
 #include "freertos/FreeRTOS.h"
@@ -59,6 +60,7 @@ static esp_reset_reason_t boot_reset_reason = ESP_RST_UNKNOWN;
 static bool startup_report_sent = false;
 
 static constexpr size_t MAX_HTTP_RESPONSE_SIZE = 1024 * 1024;
+static constexpr int HTTP_TIMEOUT_MS = 30000;
 
 static bool post_ping_message(const char *message);
 
@@ -445,7 +447,7 @@ static bool http_get(const std::string &url, http_response_t &response)
     config.method = HTTP_METHOD_GET;
     config.event_handler = http_event_handler;
     config.user_data = &response;
-    config.timeout_ms = 10000;
+    config.timeout_ms = HTTP_TIMEOUT_MS;
     config.crt_bundle_attach = is_https ? esp_crt_bundle_attach : nullptr;
 
     esp_http_client_handle_t client = esp_http_client_init(&config);
@@ -460,6 +462,17 @@ static bool http_get(const std::string &url, http_response_t &response)
     const int status = result == ESP_OK
                            ? esp_http_client_get_status_code(client)
                            : 0;
+    if (result != ESP_OK || status < 200 || status >= 300)
+    {
+        std::printf(
+            "HTTP GET failed: result=%s status=%d response_bytes=%u "
+            "free_heap=%u largest_block=%u\n",
+            esp_err_to_name(result), status,
+            static_cast<unsigned>(response.length),
+            static_cast<unsigned>(heap_caps_get_free_size(MALLOC_CAP_8BIT)),
+            static_cast<unsigned>(
+                heap_caps_get_largest_free_block(MALLOC_CAP_8BIT)));
+    }
     esp_http_client_cleanup(client);
     return result == ESP_OK && status >= 200 && status < 300;
 }
@@ -504,7 +517,7 @@ static bool post_ping_message(const char *message)
     esp_http_client_config_t config = {};
     config.url = ping_api_url;
     config.method = HTTP_METHOD_POST;
-    config.timeout_ms = 10000;
+    config.timeout_ms = HTTP_TIMEOUT_MS;
     config.crt_bundle_attach = is_https ? esp_crt_bundle_attach : nullptr;
 
     esp_http_client_handle_t client = esp_http_client_init(&config);
@@ -633,6 +646,12 @@ static bool decode_base64_pixels(const char *position, size_t expected_size,
             value = 62;
         else if (byte == '/')
             value = 63;
+        else if (byte == '\\' && *position == '/')
+        {
+            // PHP's JSON encoder may represent a Base64 slash as `\/`.
+            ++position;
+            value = 63;
+        }
         else if (byte == '=')
             break;
         else if (byte == ' ' || byte == '\r' || byte == '\n' ||
@@ -708,12 +727,19 @@ static bool parse_picture_json_in_place(char *json, size_t json_size,
     const char *position = find_json_value(json, "\"pixels\"");
     if (position == nullptr)
         return false;
-    pixels = reinterpret_cast<uint8_t *>(json);
     pixel_size = expected_size;
     if (*position == '[')
+    {
+        pixels = reinterpret_cast<uint8_t *>(
+            const_cast<char *>(position + 1));
         return decode_array_pixels(position + 1, expected_size, pixels);
+    }
     if (*position == '"')
+    {
+        pixels = reinterpret_cast<uint8_t *>(
+            const_cast<char *>(position + 1));
         return decode_base64_pixels(position + 1, expected_size, pixels);
+    }
     return false;
 }
 
@@ -759,6 +785,15 @@ static bool retrieve_picture(const std::string &pic_url, size_t &width,
 
         if (decoded)
             return true;
+
+        std::printf(
+            "Picture decode failed: response_bytes=%u width=%u height=%u "
+            "free_heap=%u largest_block=%u\n",
+            static_cast<unsigned>(response.length),
+            static_cast<unsigned>(width), static_cast<unsigned>(height),
+            static_cast<unsigned>(heap_caps_get_free_size(MALLOC_CAP_8BIT)),
+            static_cast<unsigned>(
+                heap_caps_get_largest_free_block(MALLOC_CAP_8BIT)));
 
         if (attempt < max_attempts)
         {
@@ -1310,7 +1345,7 @@ static void fetch_content()
     config.method = HTTP_METHOD_GET;
     config.event_handler = http_event_handler;
     config.user_data = &response;
-    config.timeout_ms = 10000;
+    config.timeout_ms = HTTP_TIMEOUT_MS;
     config.crt_bundle_attach = is_https ? esp_crt_bundle_attach : nullptr;
 
     esp_http_client_handle_t client = esp_http_client_init(&config);
@@ -1569,6 +1604,22 @@ static void wifi_event_handler(void *arg, esp_event_base_t event_base,
 
 extern "C" void app_main()
 {
+#if CONFIG_SPIRAM
+    if (esp_psram_is_initialized())
+    {
+        std::printf("PSRAM: enabled, %zu bytes total, %zu bytes available in heap\n",
+                    esp_psram_get_size(),
+                    heap_caps_get_free_size(MALLOC_CAP_SPIRAM));
+    }
+    else
+    {
+        std::printf("PSRAM: enabled in configuration but not initialized; 0 bytes available\n");
+    }
+#else
+    std::printf("PSRAM: disabled in configuration; 0 bytes available\n");
+#endif
+    std::fflush(stdout);
+
     boot_reset_reason = esp_reset_reason();
     if (boot_reset_reason == ESP_RST_POWERON)
         retained_failure.signature = 0;
