@@ -12,6 +12,7 @@
 @endif
 
 <form method="get" action="{{ route('admin.articles') }}">
+    <input type="hidden" name="page" value="1">
     <label for="per-page">Entries per page</label>
     <select id="per-page" name="per_page">
         @foreach ($perPageOptions as $option)
@@ -118,7 +119,7 @@
 
 @foreach ($articles as $article)
 <dialog id="edit-article-modal-{{ $article->A_id }}" class="article-modal">
-    <form method="post" action="{{ route('admin.articles.update', $article) }}" enctype="multipart/form-data">
+    <form method="post" action="{{ route('admin.articles.update', ['article' => $article, ...$listState]) }}" enctype="multipart/form-data">
         @csrf
         @method('PUT')
         <h3>Edit article</h3>
