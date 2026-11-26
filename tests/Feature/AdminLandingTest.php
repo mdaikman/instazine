@@ -177,6 +177,10 @@ class AdminLandingTest extends TestCase
             ->assertSee('type="hidden" name="author" value="'.$honcho->id.'"', false)
             ->assertSee('class="article-form-thumbnail"', false)
             ->assertSee('class="article-picture-input"', false)
+            ->assertSee('↶ Rotate left')
+            ->assertSee('↷ Rotate right')
+            ->assertSee('id="rotate-article-left-'.$article->A_id.'"', false)
+            ->assertSee('id="rotate-article-right-'.$article->A_id.'"', false)
             ->assertDontSee('Current file');
 
         $this->actingAs($honcho)
@@ -202,6 +206,47 @@ class AdminLandingTest extends TestCase
             ->assertRedirect(route('admin.articles'));
 
         $this->assertDatabaseMissing('Article', ['A_id' => $article->A_id]);
+    }
+
+    public function test_honcho_can_rotate_an_existing_article_picture_left_or_right(): void
+    {
+        Storage::fake('local');
+        config()->set('instazine.printer_pixel_width', 10);
+        config()->set('instazine.image_height_max', 100);
+        $honcho = User::factory()->create(['level' => UserLevel::Honcho]);
+
+        foreach (['left', 'right'] as $direction) {
+            $path = "article-pics/rotate-{$direction}.bmp";
+            $image = imagecreatetruecolor(2, 4);
+            $white = imagecolorallocate($image, 255, 255, 255);
+            $black = imagecolorallocate($image, 0, 0, 0);
+            imagefill($image, 0, 0, $white);
+            imagesetpixel($image, 0, 0, $black);
+            ob_start();
+            imagebmp($image, null, true);
+            Storage::disk('local')->put($path, ob_get_clean());
+            imagedestroy($image);
+
+            $article = Article::query()->create([
+                'Approved' => true,
+                'Headline' => "Rotate {$direction}",
+                'Pic' => $path,
+                'Author' => $honcho->id,
+                'Date' => '2026-08-02 09:00:00',
+            ]);
+
+            $this->actingAs($honcho)
+                ->patch(route('admin.articles.picture.rotate', $article), [
+                    'direction' => $direction,
+                ])
+                ->assertRedirect(route('admin.articles'))
+                ->assertSessionHas('status', "Picture rotated {$direction}.");
+
+            $rotated = imagecreatefromstring(Storage::disk('local')->get($path));
+            $this->assertSame(4, imagesx($rotated));
+            $this->assertSame(2, imagesy($rotated));
+            imagedestroy($rotated);
+        }
     }
 
     public function test_new_articles_are_always_approved(): void

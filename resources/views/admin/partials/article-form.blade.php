@@ -24,9 +24,13 @@
     @if ($article?->hasPicture)
         <img
             class="article-form-thumbnail"
-            src="{{ route('admin.articles.picture', $article) }}"
+            src="{{ route('admin.articles.picture', ['article' => $article, 'v' => $article->pictureVersion]) }}"
             alt="Current picture for {{ $article->Headline }}"
         >
+        <div class="article-picture-rotation" aria-label="Rotate current picture">
+            <button type="submit" form="rotate-article-left-{{ $article->A_id }}" title="Rotate picture left">↶ Rotate left</button>
+            <button type="submit" form="rotate-article-right-{{ $article->A_id }}" title="Rotate picture right">↷ Rotate right</button>
+        </div>
     @endif
     <input
         class="article-picture-input"

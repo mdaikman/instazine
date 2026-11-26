@@ -28,7 +28,7 @@
             padding: 1rem 2rem;
             color: #fff;
             background-color: #2878b8;
-            background-image: url('/images/textures/banner-paper-blue.webp');
+            background-image: url('{{ asset('images/textures/banner-paper-blue.webp') }}');
             background-position: center;
             background-size: cover;
         }
@@ -69,7 +69,7 @@
         .menu-panel {
             color: #fff;
             background-color: #278547;
-            background-image: url('/images/textures/sidebar-paper-green.webp');
+            background-image: url('{{ asset('images/textures/sidebar-paper-green.webp') }}');
             background-position: top left;
             background-size: 32rem auto;
         }
@@ -128,7 +128,7 @@
             min-width: 0;
             padding: 2rem;
             background-color: #f8f5ea;
-            background-image: url('/images/textures/main-washi-paper.webp');
+            background-image: url('{{ asset('images/textures/main-washi-paper.webp') }}');
             background-position: center;
             background-repeat: no-repeat;
             background-size: cover;

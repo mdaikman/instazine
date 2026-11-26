@@ -5,9 +5,8 @@ namespace Tests\Feature\Api;
 use Illuminate\Database\Schema\Blueprint;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Schema;
-use Tests\TestCase;
 
-class PingTest extends TestCase
+class PingTest extends ApiTestCase
 {
     use RefreshDatabase;
 

@@ -19,19 +19,18 @@ class LoginController extends Controller
         ]);
 
         $user = User::query()->where('name', $credentials['name'])->first();
+        $reporterPassword = (string) config('instazine.reporter_password');
 
-        if ($user && Hash::check($credentials['password'], $user->password)) {
+        if ($user
+            && $user->level === UserLevel::Honcho
+            && Hash::check($credentials['password'], $user->password)) {
             Auth::login($user);
             $request->session()->regenerate();
 
-            return redirect()->route(
-                $user->level === UserLevel::Honcho
-                    ? 'admin.articles'
-                    : 'reporter.suggest-story',
-            );
+            return redirect()->route('admin.articles');
         }
 
-        if ($credentials['password'] !== 'instazine') {
+        if ($reporterPassword === '' || ! hash_equals($reporterPassword, $credentials['password'])) {
             return back()
                 ->withErrors(['name' => 'The provided credentials do not match our records.'])
                 ->onlyInput('name');
@@ -43,12 +42,18 @@ class LoginController extends Controller
                 ->onlyInput('name');
         }
 
-        $user ??= User::query()->create([
-            'name' => $credentials['name'],
-            'email' => $credentials['name'].'@reporter.instazine.local',
-            'level' => UserLevel::Reporter,
-            'password' => Hash::make('instazine'),
-        ]);
+        if ($user) {
+            if (! Hash::check($reporterPassword, $user->password)) {
+                $user->update(['password' => Hash::make($reporterPassword)]);
+            }
+        } else {
+            $user = User::query()->create([
+                'name' => $credentials['name'],
+                'email' => $credentials['name'].'@reporter.instazine.local',
+                'level' => UserLevel::Reporter,
+                'password' => Hash::make($reporterPassword),
+            ]);
+        }
 
         Auth::login($user);
         $request->session()->regenerate();

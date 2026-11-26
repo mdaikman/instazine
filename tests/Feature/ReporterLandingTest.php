@@ -8,6 +8,7 @@ use App\Models\User;
 use Illuminate\Database\Schema\Blueprint;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Http\UploadedFile;
+use Illuminate\Support\Facades\Hash;
 use Illuminate\Support\Facades\Schema;
 use Illuminate\Support\Facades\Storage;
 use Tests\TestCase;
@@ -16,9 +17,13 @@ class ReporterLandingTest extends TestCase
 {
     use RefreshDatabase;
 
+    private const REPORTER_PASSWORD = 'test-reporter-password';
+
     protected function setUp(): void
     {
         parent::setUp();
+
+        config()->set('instazine.reporter_password', self::REPORTER_PASSWORD);
 
         Schema::create('Article', function (Blueprint $table) {
             $table->id('A_id');
@@ -36,7 +41,7 @@ class ReporterLandingTest extends TestCase
     {
         $this->post('/login', [
             'name' => 'story_writer-1',
-            'password' => 'instazine',
+            'password' => self::REPORTER_PASSWORD,
         ])->assertRedirect(route('reporter.suggest-story'));
 
         $reporter = User::query()->where('name', 'story_writer-1')->sole();
@@ -58,14 +63,38 @@ class ReporterLandingTest extends TestCase
         User::factory()->create([
             'name' => 'newsroom',
             'level' => UserLevel::Reporter,
+            'password' => Hash::make('instazine'),
         ]);
 
         $this->post('/login', [
             'name' => 'newsroom',
-            'password' => 'instazine',
+            'password' => self::REPORTER_PASSWORD,
         ])->assertRedirect(route('reporter.suggest-story'));
 
         $this->assertSame(1, User::query()->where('name', 'newsroom')->count());
+        $this->assertTrue(Hash::check(
+            self::REPORTER_PASSWORD,
+            User::query()->where('name', 'newsroom')->sole()->password,
+        ));
+    }
+
+    public function test_old_shared_password_no_longer_logs_in_an_existing_reporter(): void
+    {
+        $reporter = User::factory()->create([
+            'name' => 'newsroom',
+            'level' => UserLevel::Reporter,
+            'password' => Hash::make('instazine'),
+        ]);
+
+        $this->from('/login')
+            ->post('/login', [
+                'name' => $reporter->name,
+                'password' => 'instazine',
+            ])
+            ->assertRedirect('/login')
+            ->assertSessionHasErrors('name');
+
+        $this->assertGuest();
     }
 
     public function test_reporter_login_ignores_an_admin_intended_destination(): void
@@ -78,7 +107,7 @@ class ReporterLandingTest extends TestCase
         $this->withSession(['url.intended' => route('admin.articles')])
             ->post('/login', [
                 'name' => $reporter->name,
-                'password' => 'instazine',
+                'password' => self::REPORTER_PASSWORD,
             ])
             ->assertRedirect(route('reporter.suggest-story'));
     }
@@ -208,7 +237,7 @@ class ReporterLandingTest extends TestCase
     public function test_reporter_name_must_use_database_safe_characters(): void
     {
         $this->from('/login')
-            ->post('/login', ['name' => 'story writer', 'password' => 'instazine'])
+            ->post('/login', ['name' => 'story writer', 'password' => self::REPORTER_PASSWORD])
             ->assertRedirect('/login')
             ->assertSessionHasErrors('name');
     }

@@ -3,9 +3,8 @@
 namespace Tests\Feature\Api;
 
 use Illuminate\Support\Facades\Storage;
-use Tests\TestCase;
 
-class PictureTest extends TestCase
+class PictureTest extends ApiTestCase
 {
     public function test_it_returns_bmp_dimensions_and_packed_one_bit_pixels(): void
     {
@@ -31,7 +30,7 @@ class PictureTest extends TestCase
             ->assertExactJson([
                 'height' => 2,
                 'width' => 10,
-                'pixels' => [160, 0, 1, 128],
+                'pixels' => 'oAABgA==',
             ]);
 
         $this->assertSame(
@@ -56,6 +55,27 @@ class PictureTest extends TestCase
                 ->assertContent('null')
                 ->assertHeader('Content-Type', 'application/json');
         }
+    }
+
+    public function test_it_accepts_the_legacy_private_storage_prefix(): void
+    {
+        Storage::fake('local');
+        $image = imagecreatetruecolor(1, 1);
+        imagefill($image, 0, 0, imagecolorallocate($image, 0, 0, 0));
+
+        ob_start();
+        imagebmp($image, null, true);
+        $contents = ob_get_clean();
+        imagedestroy($image);
+        Storage::disk('local')->put('banners/example.bmp', $contents);
+
+        $this->getJson('/api/pic?url=storage%2Fapp%2Fprivate%2Fbanners%2Fexample.bmp')
+            ->assertOk()
+            ->assertExactJson([
+                'height' => 1,
+                'width' => 1,
+                'pixels' => 'gA==',
+            ]);
     }
 
     public function test_it_returns_json_null_when_the_file_is_not_a_valid_bmp(): void

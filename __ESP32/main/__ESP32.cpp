@@ -19,6 +19,7 @@
 #include "esp_heap_caps.h"
 #include "esp_log.h"
 #include "esp_netif.h"
+#include "esp_psram.h"
 #include "esp_system.h"
 #include "esp_wifi.h"
 #include "freertos/FreeRTOS.h"
@@ -39,8 +40,11 @@ static constexpr gpio_num_t ARCADE_LED_PIN = GPIO_NUM_5;
 static constexpr char CONTENT_DIVIDER[] =
     "-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=\r\n";
 static TaskHandle_t content_request_task_handle;
+static TaskHandle_t image_preload_task_handle;
 static std::atomic<bool> led_cycle_enabled{true};
 static std::atomic<bool> wifi_connected{false};
+static std::atomic<bool> picture_cache_ready{false};
+static std::atomic<bool> picture_cache_manifest_loaded{false};
 
 struct retained_failure_t
 {
@@ -56,6 +60,7 @@ static esp_reset_reason_t boot_reset_reason = ESP_RST_UNKNOWN;
 static bool startup_report_sent = false;
 
 static constexpr size_t MAX_HTTP_RESPONSE_SIZE = 1024 * 1024;
+static constexpr int HTTP_TIMEOUT_MS = 30000;
 
 static bool post_ping_message(const char *message);
 
@@ -117,6 +122,17 @@ struct http_response_t
     char *data = nullptr;
     size_t length = 0;
 };
+
+struct cached_picture_t
+{
+    std::string url;
+    size_t width = 0;
+    size_t height = 0;
+    std::vector<uint8_t> pixels;
+};
+
+static std::vector<cached_picture_t> picture_cache;
+static std::vector<std::string> picture_cache_targets;
 
 static bool get_string(const cJSON *object, const char *key,
                        std::string &destination)
@@ -424,13 +440,14 @@ static std::string url_encode_query_value(const std::string &value)
 
 static bool http_get(const std::string &url, http_response_t &response)
 {
+    static constexpr char authorization[] = "Bearer " API_TOKEN;
     const bool is_https = url.compare(0, 8, "https://") == 0;
     esp_http_client_config_t config = {};
     config.url = url.c_str();
     config.method = HTTP_METHOD_GET;
     config.event_handler = http_event_handler;
     config.user_data = &response;
-    config.timeout_ms = 10000;
+    config.timeout_ms = HTTP_TIMEOUT_MS;
     config.crt_bundle_attach = is_https ? esp_crt_bundle_attach : nullptr;
 
     esp_http_client_handle_t client = esp_http_client_init(&config);
@@ -439,16 +456,30 @@ static bool http_get(const std::string &url, http_response_t &response)
         return false;
     }
 
+    esp_http_client_set_header(client, "Authorization", authorization);
+
     const esp_err_t result = esp_http_client_perform(client);
     const int status = result == ESP_OK
                            ? esp_http_client_get_status_code(client)
                            : 0;
+    if (result != ESP_OK || status < 200 || status >= 300)
+    {
+        std::printf(
+            "HTTP GET failed: result=%s status=%d response_bytes=%u "
+            "free_heap=%u largest_block=%u\n",
+            esp_err_to_name(result), status,
+            static_cast<unsigned>(response.length),
+            static_cast<unsigned>(heap_caps_get_free_size(MALLOC_CAP_8BIT)),
+            static_cast<unsigned>(
+                heap_caps_get_largest_free_block(MALLOC_CAP_8BIT)));
+    }
     esp_http_client_cleanup(client);
     return result == ESP_OK && status >= 200 && status < 300;
 }
 
 static bool post_ping_message(const char *message)
 {
+    static constexpr char authorization[] = "Bearer " API_TOKEN;
     static constexpr char ping_api_url[] =
         BASE_DOMAIN ":" BASE_PORT PING_API_ROUTE;
     if (message == nullptr)
@@ -486,7 +517,7 @@ static bool post_ping_message(const char *message)
     esp_http_client_config_t config = {};
     config.url = ping_api_url;
     config.method = HTTP_METHOD_POST;
-    config.timeout_ms = 10000;
+    config.timeout_ms = HTTP_TIMEOUT_MS;
     config.crt_bundle_attach = is_https ? esp_crt_bundle_attach : nullptr;
 
     esp_http_client_handle_t client = esp_http_client_init(&config);
@@ -496,6 +527,7 @@ static bool post_ping_message(const char *message)
     }
 
     esp_http_client_set_header(client, "Content-Type", "application/json");
+    esp_http_client_set_header(client, "Authorization", authorization);
     esp_err_t result = esp_http_client_open(client, body_length);
     if (result == ESP_OK)
     {
@@ -614,6 +646,12 @@ static bool decode_base64_pixels(const char *position, size_t expected_size,
             value = 62;
         else if (byte == '/')
             value = 63;
+        else if (byte == '\\' && *position == '/')
+        {
+            // PHP's JSON encoder may represent a Base64 slash as `\/`.
+            ++position;
+            value = 63;
+        }
         else if (byte == '=')
             break;
         else if (byte == ' ' || byte == '\r' || byte == '\n' ||
@@ -689,38 +727,38 @@ static bool parse_picture_json_in_place(char *json, size_t json_size,
     const char *position = find_json_value(json, "\"pixels\"");
     if (position == nullptr)
         return false;
-    pixels = reinterpret_cast<uint8_t *>(json);
     pixel_size = expected_size;
     if (*position == '[')
+    {
+        pixels = reinterpret_cast<uint8_t *>(
+            const_cast<char *>(position + 1));
         return decode_array_pixels(position + 1, expected_size, pixels);
+    }
     if (*position == '"')
+    {
+        pixels = reinterpret_cast<uint8_t *>(
+            const_cast<char *>(position + 1));
         return decode_base64_pixels(position + 1, expected_size, pixels);
+    }
     return false;
 }
 
-static bool print_pic_to_printer(const std::string &pic_url)
+static bool retrieve_picture(const std::string &pic_url, size_t &width,
+                             size_t &height, std::vector<uint8_t> &pixels)
 {
-    if (!has_relative_bmp_url(pic_url))
-    {
-        return false;
-    }
-
     const std::string request_url =
         BASE_DOMAIN ":" BASE_PORT PIC_API_ROUTE "?url=" +
         url_encode_query_value(pic_url);
-    size_t width = 0;
-    size_t height = 0;
-    uint8_t *source = nullptr;
-    size_t source_size = 0;
-    char *pixel_storage = nullptr;
     static constexpr unsigned max_attempts = 4; // Initial + 3 retries.
-    bool decoded = false;
+
     for (unsigned attempt = 1; attempt <= max_attempts; ++attempt)
     {
         std::printf("Retrieving picture (attempt %u/%u): %s\n",
                     attempt, max_attempts, pic_url.c_str());
         http_response_t response;
         const bool retrieved = http_get(request_url, response);
+        bool decoded = false;
+
         if (retrieved && response.data != nullptr && response.length != 0)
         {
             const char *response_start = response.data;
@@ -733,23 +771,29 @@ static bool print_pic_to_printer(const std::string &pic_url)
                 return false;
             }
 
+            uint8_t *source = nullptr;
+            size_t source_size = 0;
             width = 0;
             height = 0;
-            source = nullptr;
-            source_size = 0;
             decoded = parse_picture_json_in_place(
                 response.data, response.length, width, height, source,
                 source_size);
             if (decoded)
-            {
-                pixel_storage = response.data;
-                response.data = nullptr;
-            }
+                pixels.assign(source, source + source_size);
         }
         std::free(response.data);
 
         if (decoded)
-            break;
+            return true;
+
+        std::printf(
+            "Picture decode failed: response_bytes=%u width=%u height=%u "
+            "free_heap=%u largest_block=%u\n",
+            static_cast<unsigned>(response.length),
+            static_cast<unsigned>(width), static_cast<unsigned>(height),
+            static_cast<unsigned>(heap_caps_get_free_size(MALLOC_CAP_8BIT)),
+            static_cast<unsigned>(
+                heap_caps_get_largest_free_block(MALLOC_CAP_8BIT)));
 
         if (attempt < max_attempts)
         {
@@ -758,12 +802,121 @@ static bool print_pic_to_printer(const std::string &pic_url)
             vTaskDelay(pdMS_TO_TICKS(250));
         }
     }
-    if (!decoded)
+
+    return false;
+}
+
+static const cached_picture_t *find_cached_picture(const std::string &url)
+{
+    for (const cached_picture_t &picture : picture_cache)
+    {
+        if (picture.url == url)
+            return &picture;
+    }
+
+    return nullptr;
+}
+
+static bool cache_picture(const std::string &url)
+{
+    if (find_cached_picture(url) != nullptr)
+        return true;
+
+    cached_picture_t picture;
+    picture.url = url;
+    if (!retrieve_picture(picture.url, picture.width, picture.height,
+                          picture.pixels))
+        return false;
+
+    std::printf("Cached picture: %s (%ux%u)\n", picture.url.c_str(),
+                static_cast<unsigned>(picture.width),
+                static_cast<unsigned>(picture.height));
+    picture_cache.emplace_back(std::move(picture));
+    return true;
+}
+
+static bool picture_cache_is_complete()
+{
+    if (!picture_cache_manifest_loaded.load())
+        return false;
+
+    if (picture_cache_targets.empty())
+        return true;
+
+    for (const std::string &url : picture_cache_targets)
+    {
+        if (find_cached_picture(url) == nullptr)
+            return false;
+    }
+
+    return true;
+}
+
+static bool preload_configured_pictures();
+
+static void retry_missing_cached_pictures()
+{
+    if (picture_cache_ready.load())
+        return;
+
+    if (!picture_cache_manifest_loaded.load())
+    {
+        std::printf("Retrying picture asset manifest\n");
+        const bool cache_ready = preload_configured_pictures();
+        picture_cache_ready.store(cache_ready);
+        std::printf("Button LED %s\n",
+                    cache_ready ? "enabled; picture cache is ready"
+                                : "held off; picture cache is incomplete");
+        std::fflush(stdout);
+        return;
+    }
+
+    std::printf("Retrying missing cached pictures\n");
+    for (const std::string &url : picture_cache_targets)
+    {
+        if (find_cached_picture(url) == nullptr && !cache_picture(url))
+            std::printf("Picture remains uncached: %s\n", url.c_str());
+    }
+
+    if (picture_cache_is_complete())
+    {
+        picture_cache_ready.store(true);
+        std::printf("Button LED enabled; picture cache is ready\n");
+    }
+    else
+    {
+        std::printf("Button LED held off; picture cache is incomplete\n");
+    }
+    std::fflush(stdout);
+}
+
+static bool print_pic_to_printer(const std::string &pic_url)
+{
+    if (!has_relative_bmp_url(pic_url))
+    {
+        return false;
+    }
+
+    size_t width = 0;
+    size_t height = 0;
+    std::vector<uint8_t> downloaded_pixels;
+    const cached_picture_t *cached = find_cached_picture(pic_url);
+    if (cached != nullptr)
+    {
+        width = cached->width;
+        height = cached->height;
+        std::printf("Using cached picture: %s\n", pic_url.c_str());
+    }
+    else if (!retrieve_picture(pic_url, width, height, downloaded_pixels))
     {
         report_error("Unable to retrieve or decode picture after 3 retries: %s",
                      pic_url.c_str());
         return false;
     }
+    const std::vector<uint8_t> &pixels =
+        cached != nullptr ? cached->pixels : downloaded_pixels;
+    const uint8_t *source = pixels.data();
+    const size_t source_size = pixels.size();
     std::printf("Decoded picture: %ux%u pixels\n",
                 static_cast<unsigned>(width),
                 static_cast<unsigned>(height));
@@ -782,7 +935,6 @@ static bool print_pic_to_printer(const std::string &pic_url)
         {
             report_error("Not enough memory to center picture: %s",
                          pic_url.c_str());
-            std::free(pixel_storage);
             return false;
         }
         const size_t left_padding = (PRINTER_PIXEL_WIDTH - width) / 2;
@@ -820,7 +972,6 @@ static bool print_pic_to_printer(const std::string &pic_url)
                       raster_size) &&
         printer_write("\r\n", 2);
     std::free(centered);
-    std::free(pixel_storage);
     if (!print_succeeded)
     {
         report_error("Unable to send picture to printer: %s",
@@ -829,6 +980,77 @@ static bool print_pic_to_printer(const std::string &pic_url)
     }
     std::printf("Printed picture: %s\n", pic_url.c_str());
     return true;
+}
+
+static bool preload_configured_pictures()
+{
+    static constexpr char asset_api_url[] =
+        BASE_DOMAIN ":" BASE_PORT ASSET_API_ROUTE;
+    http_response_t response;
+
+    std::printf("Preloading configured banner and divider pictures\n");
+    if (!http_get(asset_api_url, response) || response.data == nullptr)
+    {
+        std::free(response.data);
+        report_error("Unable to retrieve picture asset manifest");
+        return false;
+    }
+
+    cJSON *root = cJSON_ParseWithLength(response.data, response.length);
+    const cJSON *images = root != nullptr
+                              ? cJSON_GetObjectItemCaseSensitive(root, "images")
+                              : nullptr;
+    if (!cJSON_IsArray(images))
+    {
+        cJSON_Delete(root);
+        std::free(response.data);
+        report_error("Picture asset manifest is invalid");
+        return false;
+    }
+    picture_cache_manifest_loaded.store(true);
+
+    static constexpr size_t max_cached_pictures = 8;
+    bool all_loaded = true;
+    const cJSON *image = nullptr;
+    cJSON_ArrayForEach(image, images)
+    {
+        if (picture_cache_targets.size() >= max_cached_pictures)
+        {
+            all_loaded = false;
+            break;
+        }
+        if (!cJSON_IsString(image) || image->valuestring == nullptr)
+            continue;
+
+        const std::string url = image->valuestring;
+        if (!has_relative_bmp_url(url))
+            continue;
+
+        bool already_targeted = false;
+        for (const std::string &target : picture_cache_targets)
+        {
+            if (target == url)
+            {
+                already_targeted = true;
+                break;
+            }
+        }
+        if (already_targeted)
+            continue;
+
+        picture_cache_targets.push_back(url);
+        if (!cache_picture(url))
+        {
+            all_loaded = false;
+            report_error("Unable to preload picture: %s", url.c_str());
+        }
+    }
+
+    cJSON_Delete(root);
+    std::free(response.data);
+    std::printf("Picture preload complete: %u cached\n",
+                static_cast<unsigned>(picture_cache.size()));
+    return all_loaded && picture_cache_is_complete();
 }
 
 static void append_wrapped_printer_line(std::string &document,
@@ -1109,6 +1331,9 @@ static esp_err_t http_event_handler(esp_http_client_event_t *event)
 
 static void fetch_content()
 {
+    retry_missing_cached_pictures();
+
+    static constexpr char authorization[] = "Bearer " API_TOKEN;
     http_response_t response;
     static constexpr char content_api_url[] =
         BASE_DOMAIN ":" BASE_PORT CONTENT_API_ROUTE;
@@ -1120,7 +1345,7 @@ static void fetch_content()
     config.method = HTTP_METHOD_GET;
     config.event_handler = http_event_handler;
     config.user_data = &response;
-    config.timeout_ms = 10000;
+    config.timeout_ms = HTTP_TIMEOUT_MS;
     config.crt_bundle_attach = is_https ? esp_crt_bundle_attach : nullptr;
 
     esp_http_client_handle_t client = esp_http_client_init(&config);
@@ -1129,6 +1354,8 @@ static void fetch_content()
         report_error("Unable to initialize content HTTP client");
         return;
     }
+
+    esp_http_client_set_header(client, "Authorization", authorization);
 
     const esp_err_t result = esp_http_client_perform(client);
     const int status_code = result == ESP_OK
@@ -1226,6 +1453,28 @@ static void button_task(void *argument)
     }
 }
 
+static void image_preload_task(void *argument)
+{
+    const bool cache_ready = preload_configured_pictures();
+    picture_cache_ready.store(cache_ready);
+    std::printf("Button LED %s\n",
+                cache_ready ? "enabled; picture cache is ready"
+                            : "held off; picture cache is incomplete");
+    std::fflush(stdout);
+
+    if (content_request_task_handle == nullptr)
+    {
+        const BaseType_t created =
+            xTaskCreate(button_task, "button", 6144, nullptr,
+                        5, &content_request_task_handle);
+        if (created != pdPASS)
+            report_error("Unable to create HTTP request task");
+    }
+
+    image_preload_task_handle = nullptr;
+    vTaskDelete(nullptr);
+}
+
 static void arcade_led_task(void *argument)
 {
     int brightness = 0;
@@ -1234,7 +1483,7 @@ static void arcade_led_task(void *argument)
 
     while (true)
     {
-        if (!led_cycle_enabled.load())
+        if (!picture_cache_ready.load() || !led_cycle_enabled.load())
         {
             was_cycling = false;
             vTaskDelay(pdMS_TO_TICKS(10));
@@ -1339,14 +1588,15 @@ static void wifi_event_handler(void *arg, esp_event_base_t event_base,
                 post_ping_message(reset_message);
         }
 
-        if (content_request_task_handle == nullptr)
+        if (content_request_task_handle == nullptr &&
+            image_preload_task_handle == nullptr)
         {
             const BaseType_t created =
-                xTaskCreate(button_task, "button", 6144, nullptr,
-                            5, &content_request_task_handle);
+                xTaskCreate(image_preload_task, "image_preload", 8192, nullptr,
+                            5, &image_preload_task_handle);
             if (created != pdPASS)
             {
-                report_error("Unable to create HTTP request task");
+                report_error("Unable to create picture preload task");
             }
         }
     }
@@ -1354,6 +1604,22 @@ static void wifi_event_handler(void *arg, esp_event_base_t event_base,
 
 extern "C" void app_main()
 {
+#if CONFIG_SPIRAM
+    if (esp_psram_is_initialized())
+    {
+        std::printf("PSRAM: enabled, %zu bytes total, %zu bytes available in heap\n",
+                    esp_psram_get_size(),
+                    heap_caps_get_free_size(MALLOC_CAP_SPIRAM));
+    }
+    else
+    {
+        std::printf("PSRAM: enabled in configuration but not initialized; 0 bytes available\n");
+    }
+#else
+    std::printf("PSRAM: disabled in configuration; 0 bytes available\n");
+#endif
+    std::fflush(stdout);
+
     boot_reset_reason = esp_reset_reason();
     if (boot_reset_reason == ESP_RST_POWERON)
         retained_failure.signature = 0;

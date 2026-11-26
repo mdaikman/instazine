@@ -13,6 +13,10 @@ class PictureController extends Controller
     {
         $path = $request->query('url');
 
+        if (is_string($path) && str_starts_with($path, 'storage/app/private/')) {
+            $path = substr($path, strlen('storage/app/private/'));
+        }
+
         if (! $this->isSafeRelativeBmpPath($path) || ! Storage::disk('local')->exists($path)) {
             return $this->json(null);
         }
@@ -36,7 +40,7 @@ class PictureController extends Controller
             return $this->json([
                 'height' => $height,
                 'width' => $width,
-                'pixels' => $this->packPixels($image, $width, $height),
+                'pixels' => base64_encode($this->packPixels($image, $width, $height)),
             ]);
         } finally {
             imagedestroy($image);
@@ -65,11 +69,10 @@ class PictureController extends Controller
      * Pack rows MSB-first, padding the end of each row with zero bits.
      * Black pixels are 1 and white pixels are 0.
      *
-     * @return list<int>
      */
-    private function packPixels(\GdImage $image, int $width, int $height): array
+    private function packPixels(\GdImage $image, int $width, int $height): string
     {
-        $bytes = [];
+        $bytes = '';
 
         for ($y = 0; $y < $height; $y++) {
             for ($byteX = 0; $byteX < (int) ceil($width / 8); $byteX++) {
@@ -90,7 +93,7 @@ class PictureController extends Controller
                     }
                 }
 
-                $bytes[] = $byte;
+                $bytes .= chr($byte);
             }
         }
 
