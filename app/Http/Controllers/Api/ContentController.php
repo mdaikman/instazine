@@ -6,18 +6,35 @@ use App\Http\Controllers\Controller;
 use App\Models\Article;
 use App\Models\RandomText;
 use App\Models\Tracking;
+use App\Services\PrinterText;
 use Illuminate\Http\JsonResponse;
 
 class ContentController extends Controller
 {
-    public function index(): JsonResponse
+    public function index(PrinterText $printerText): JsonResponse
     {
-        $response = match (config('instazine.mode')) {
-            'EXPRESS' => response()->json($this->expressContent()),
+        $content = match (config('instazine.mode')) {
+            'EXPRESS' => $this->expressContent(),
             // LLL is short for "The least and latest lead article selection".
-            'LLL' => response()->json($this->lllContent()),
-            default => response()->json(['status' => 'UNSUPPORTED_MODE'], 501),
+            'LLL' => $this->lllContent(),
+            default => null,
         };
+
+        if ($content !== null) {
+            foreach ($content['content']['items'] as &$item) {
+                if ($item['content-type'] === 'textline') {
+                    $item['content-value'] = $printerText->convert($item['content-value']);
+                } elseif ($item['content-type'] === 'article') {
+                    $item['content-value']['headline'] = $printerText->convert($item['content-value']['headline']);
+                    $item['content-value']['text'] = $printerText->convert($item['content-value']['text']);
+                }
+            }
+            unset($item);
+        }
+
+        $response = $content === null
+            ? response()->json(['status' => 'UNSUPPORTED_MODE'], 501)
+            : response()->json($content);
 
         $response->headers->set('Content-Length', (string) strlen($response->getContent()));
 

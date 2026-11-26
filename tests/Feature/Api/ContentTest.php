@@ -5,6 +5,7 @@ namespace Tests\Feature\Api;
 use App\Models\Article;
 use App\Models\RandomText;
 use App\Models\Tracking;
+use App\Services\PrinterText;
 use Illuminate\Database\Schema\Blueprint;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Schema;
@@ -89,6 +90,79 @@ class ContentTest extends ApiTestCase
             ->assertDatabaseHas('Tracking', ['A_id' => $article->A_id])
             ->assertDatabaseHas('Tracking', ['R_id' => $mid->R_id])
             ->assertDatabaseHas('Tracking', ['R_id' => $footer->R_id]);
+    }
+
+    public function test_print_content_converts_unicode_without_changing_stored_text(): void
+    {
+        config()->set([
+            'instazine.mode' => 'EXPRESS',
+            'instazine.headers' => 1,
+            'instazine.articles' => 1,
+            'instazine.middles' => 0,
+            'instazine.footers' => 0,
+        ]);
+
+        $headline = '“Café” — Łódź… ❤❤️';
+        $body = "Cafe\u{0301}  😀😃\r\n👩‍❤️‍👩 👩🏽‍💻 🐕 1️⃣ 🏃🏃🏻 🙄😏 🇨🇦 中文\u{FE0F}";
+        $header = RandomText::query()->create(['Type' => 'HEADER', 'Random_text' => 'Straße – résumé 😉']);
+        $article = Article::query()->create([
+            'Approved' => true,
+            'Headline' => $headline,
+            'Pic' => 'article-pics/example.png',
+            'Text' => $body,
+            'Author' => 1,
+            'Date' => now(),
+        ]);
+
+        $this->getJson('/api/content')
+            ->assertOk()
+            ->assertJsonPath('content.items.1.content-value', 'Strasse - resume ;)')
+            ->assertJsonPath('content.items.2.content-value.headline', '"Cafe" - Lodz... <3<3')
+            ->assertJsonPath('content.items.2.content-value.pic', 'article-pics/example.png')
+            ->assertJsonPath('content.items.2.content-value.text', "Cafe  :D:D\r\n[women in love] [woman coding] [dog] [1] [running][running] [eye roll][smirk] [Canada flag] ");
+
+        $this->assertSame($headline, $article->fresh()->Headline);
+        $this->assertSame($body, $article->fresh()->Text);
+        $this->assertSame('Straße – résumé 😉', $header->fresh()->Random_text);
+    }
+
+    public function test_emoji_labels_aim_for_sixteen_characters_excluding_brackets_and_spaces(): void
+    {
+        $printerText = $this->app->make(PrinterText::class);
+
+        $this->assertSame(
+            '[United States flag] [IO flag] [2 adults, 2 kids] [shut box flag down] [JP no vacancy] [finger heart] [blank stare]',
+            $printerText->convert('🇺🇸 🇮🇴 🧑‍🧑‍🧒‍🧒 📪 🈵 🫰🏽 😑'),
+        );
+
+        $this->assertSame('[woman power chair >]', $printerText->convert('👩‍🦼‍➡️'));
+        $this->assertSame('[horizontal traffic light]', $printerText->convert('🚥'));
+    }
+
+    public function test_substitution_edits_apply_to_existing_content_on_the_next_request(): void
+    {
+        config()->set([
+            'instazine.mode' => 'LLL',
+            'instazine.headers' => 1,
+            'instazine.articles' => 0,
+            'instazine.footers' => 0,
+        ]);
+
+        RandomText::query()->create(['Type' => 'HEADER', 'Random_text' => 'a🙂ab …']);
+        $path = tempnam(sys_get_temp_dir(), 'instazine-printer-');
+        $this->app->bind(PrinterText::class, fn () => new PrinterText($path));
+
+        try {
+            file_put_contents($path, json_encode(['🙂' => ':)', 'a' => 'X', 'ab' => '...', '…' => 'dots', '...' => 'Y']));
+            $this->getJson('/api/content')->assertOk()
+                ->assertJsonPath('content.items.1.content-value', 'X:)... dots');
+
+            file_put_contents($path, json_encode(['🙂' => ':-)']));
+            $this->getJson('/api/content')->assertOk()
+                ->assertJsonPath('content.items.1.content-value', 'a:-)ab ');
+        } finally {
+            unlink($path);
+        }
     }
 
     public function test_express_mode_returns_requested_unique_random_texts_when_available(): void

@@ -440,6 +440,31 @@ class AdminLandingTest extends TestCase
             ->assertDontSee('Footer text');
     }
 
+    public function test_editors_display_original_unicode_for_printable_content(): void
+    {
+        $honcho = User::factory()->create(['level' => UserLevel::Honcho]);
+        $article = Article::query()->create([
+            'Headline' => '“Café” ❤',
+            'Text' => "Résumé…\n👩‍❤️‍👩",
+            'Author' => $honcho->id,
+            'Date' => now(),
+        ]);
+        $text = RandomText::query()->create([
+            'Type' => 'MID',
+            'Random_text' => 'Straße — 🐕',
+        ]);
+
+        $this->actingAs($honcho)
+            ->get(route('admin.articles'))
+            ->assertOk()
+            ->assertSee('value="“Café” ❤"', false)
+            ->assertSee('name="text" rows="6">'.$article->Text.'</textarea>', false);
+
+        $this->get(route('admin.random-texts'))
+            ->assertOk()
+            ->assertSee('maxlength="255" required>'.$text->Random_text.'</textarea>', false);
+    }
+
     public function test_edit_forms_return_to_their_own_list_state_and_clamp_removed_pages(): void
     {
         $honcho = User::factory()->create(['level' => UserLevel::Honcho]);
