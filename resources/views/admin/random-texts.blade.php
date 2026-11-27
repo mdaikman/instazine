@@ -12,6 +12,7 @@
     @endif
 
     <form method="get" action="{{ route('admin.random-texts') }}">
+        <input type="hidden" name="page" value="1">
         <label for="per-page">Entries per page</label>
         <select id="per-page" name="per_page">
             @foreach ($perPageOptions as $option)
@@ -98,7 +99,7 @@
 
     @foreach ($randomTexts as $randomText)
         <dialog id="edit-text-modal-{{ $randomText->R_id }}" class="random-texts-modal">
-            <form method="post" action="{{ route('admin.random-texts.update', $randomText) }}">
+            <form method="post" action="{{ route('admin.random-texts.update', ['randomText' => $randomText, ...$listState]) }}">
                 @csrf
                 @method('PUT')
                 <h3>Edit random text</h3>

@@ -3,10 +3,12 @@
 namespace App\Http\Controllers;
 
 use App\Models\Article;
+use App\Services\AdminListPagination;
 use App\Services\DitheredImageConverter;
 use Illuminate\Support\Carbon;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
+use Illuminate\Support\Arr;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Str;
 use Illuminate\Validation\ValidationException;
@@ -14,30 +16,25 @@ use Illuminate\View\View;
 
 class ArticleController extends Controller
 {
-    /** @var list<int> */
-    private const PER_PAGE_OPTIONS = [10, 25, 50, 100];
-
     public function __construct(private DitheredImageConverter $imageConverter)
     {
     }
 
     public function index(Request $request): View
     {
-        $perPage = $request->integer('per_page', self::PER_PAGE_OPTIONS[0]);
-
-        if (! in_array($perPage, self::PER_PAGE_OPTIONS, true)) {
-            $perPage = self::PER_PAGE_OPTIONS[0];
-        }
-
-        $articles = Article::query()
+        $query = Article::query()
             ->select(['A_id', 'Approved', 'Headline', 'Pic', 'Text', 'Author', 'Date'])
             ->with('author:id,name')
             ->withCount('tracking')
             ->withMax('tracking', 'created_at')
             ->orderByDesc('Date')
-            ->orderByDesc('A_id')
-            ->paginate($perPage)
-            ->withQueryString();
+            ->orderByDesc('A_id');
+
+        $articles = AdminListPagination::paginate(
+            $request,
+            'admin.lists.articles',
+            $query,
+        );
 
         $articles->getCollection()->each(function (Article $article): void {
             $hasPicture = filled($article->Pic)
@@ -53,8 +50,9 @@ class ArticleController extends Controller
 
         return view('admin.articles', [
             'articles' => $articles,
-            'perPage' => $perPage,
-            'perPageOptions' => self::PER_PAGE_OPTIONS,
+            'perPage' => $articles->perPage(),
+            'listState' => $request->session()->get('admin.lists.articles'),
+            'perPageOptions' => AdminListPagination::PER_PAGE_OPTIONS,
         ]);
     }
 
@@ -103,7 +101,7 @@ class ArticleController extends Controller
         }
 
         return redirect()
-            ->route('admin.articles')
+            ->route('admin.articles', Arr::only($request->query(), ['page', 'per_page']))
             ->with('status', 'Article updated.');
     }
 

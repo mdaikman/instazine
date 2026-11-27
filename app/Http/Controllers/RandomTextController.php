@@ -3,42 +3,43 @@
 namespace App\Http\Controllers;
 
 use App\Models\RandomText;
+use App\Services\AdminListPagination;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
+use Illuminate\Support\Arr;
 use Illuminate\View\View;
 use Illuminate\Validation\Rule;
 
 class RandomTextController extends Controller
 {
-    /** @var list<int> */
-    private const PER_PAGE_OPTIONS = [10, 25, 50, 100];
-
     public function index(Request $request): View
     {
-        $perPage = $request->integer('per_page', self::PER_PAGE_OPTIONS[0]);
-
-        if (! in_array($perPage, self::PER_PAGE_OPTIONS, true)) {
-            $perPage = self::PER_PAGE_OPTIONS[0];
-        }
-
-        $type = $request->string('type')->toString();
+        $type = $request->query->has('type')
+            ? $request->query('type')
+            : $request->session()->get('admin.lists.random-texts.type');
 
         if (! in_array($type, ['HEADER', 'MID', 'FOOTER'], true)) {
             $type = null;
         }
 
-        $randomTexts = RandomText::query()
+        $query = RandomText::query()
             ->select(['R_id', 'Type', 'Random_text'])
             ->when($type, fn ($query) => $query->where('Type', $type))
             ->withCount('tracking')
             ->withMax('tracking', 'created_at')
-            ->orderBy('R_id')
-            ->paginate($perPage)
-            ->withQueryString();
+            ->orderBy('R_id');
+
+        $randomTexts = AdminListPagination::paginate(
+            $request,
+            'admin.lists.random-texts',
+            $query,
+            ['type' => $type ?? ''],
+        );
 
         return view('admin.random-texts', [
-            'perPage' => $perPage,
-            'perPageOptions' => self::PER_PAGE_OPTIONS,
+            'perPage' => $randomTexts->perPage(),
+            'listState' => $request->session()->get('admin.lists.random-texts'),
+            'perPageOptions' => AdminListPagination::PER_PAGE_OPTIONS,
             'randomTexts' => $randomTexts,
             'type' => $type,
         ]);
@@ -67,8 +68,14 @@ class RandomTextController extends Controller
             'Random_text' => $validated['text'],
         ]);
 
+        $listState = Arr::only($request->query(), ['page', 'per_page', 'type']);
+
+        if (array_key_exists('type', $listState)) {
+            $listState['type'] ??= '';
+        }
+
         return redirect()
-            ->route('admin.random-texts')
+            ->route('admin.random-texts', $listState)
             ->with('status', 'Random text updated.');
     }
 

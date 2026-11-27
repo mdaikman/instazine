@@ -440,6 +440,91 @@ class AdminLandingTest extends TestCase
             ->assertDontSee('Footer text');
     }
 
+    public function test_editors_display_original_unicode_for_printable_content(): void
+    {
+        $honcho = User::factory()->create(['level' => UserLevel::Honcho]);
+        $article = Article::query()->create([
+            'Headline' => '“Café” ❤',
+            'Text' => "Résumé…\n👩‍❤️‍👩",
+            'Author' => $honcho->id,
+            'Date' => now(),
+        ]);
+        $text = RandomText::query()->create([
+            'Type' => 'MID',
+            'Random_text' => 'Straße — 🐕',
+        ]);
+
+        $this->actingAs($honcho)
+            ->get(route('admin.articles'))
+            ->assertOk()
+            ->assertSee('value="“Café” ❤"', false)
+            ->assertSee('name="text" rows="6">'.$article->Text.'</textarea>', false);
+
+        $this->get(route('admin.random-texts'))
+            ->assertOk()
+            ->assertSee('maxlength="255" required>'.$text->Random_text.'</textarea>', false);
+    }
+
+    public function test_edit_forms_return_to_their_own_list_state_and_clamp_removed_pages(): void
+    {
+        $honcho = User::factory()->create(['level' => UserLevel::Honcho]);
+        foreach (range(1, 51) as $number) {
+            Article::query()->create([
+                'Headline' => "Article {$number}",
+                'Author' => $honcho->id,
+                'Date' => '2026-08-02 10:00:00',
+            ]);
+            $randomText = RandomText::query()->create([
+                'Type' => 'MID',
+                'Random_text' => "Text {$number}",
+            ]);
+        }
+        $firstArticle = Article::query()->orderBy('A_id')->firstOrFail();
+
+        $articles = ['page' => 3, 'per_page' => 25];
+        $texts = ['page' => 2, 'per_page' => 50, 'type' => 'MID'];
+        $articleForm = route('admin.articles.update', ['article' => $firstArticle, ...$articles]);
+        $textForm = route('admin.random-texts.update', ['randomText' => $randomText, ...$texts]);
+
+        $this->actingAs($honcho)
+            ->get(route('admin.articles', $articles))
+            ->assertViewHas('listState', $articles)
+            ->assertSee($articleForm)
+            ->assertSee('data-close-modal="edit-article-modal-'.$firstArticle->A_id.'"', false);
+
+        $this->get(route('admin.random-texts', $texts))
+            ->assertViewHas('listState', $texts)
+            ->assertSee($textForm)
+            ->assertSee('data-close-modal="edit-text-modal-'.$randomText->R_id.'"', false);
+
+        $this->get(route('admin.articles'))->assertViewHas('listState', $articles);
+        $this->get(route('admin.random-texts'))->assertViewHas('listState', $texts);
+
+        $this->get(route('admin.articles', ['page' => 1, 'per_page' => 10]));
+        $this->followingRedirects()->put($articleForm, [
+            'headline' => 'Updated article',
+            'text' => 'Updated text',
+            'author' => $honcho->id,
+            'date' => '2026-08-02 10:00:00',
+            'timezone' => 'UTC',
+        ])->assertViewHas('listState', $articles)->assertSee('Updated article');
+
+        $this->followingRedirects()->put($textForm, [
+            'type' => 'MID',
+            'text' => 'Updated random text',
+        ])->assertViewHas('listState', $texts)->assertSee('Updated random text');
+
+        $this->followingRedirects()->put($textForm, [
+            'type' => 'HEADER',
+            'text' => 'Moved out of the current filter',
+        ])->assertViewHas('listState', ['page' => 1, 'per_page' => 50, 'type' => 'MID'])
+            ->assertDontSee('Moved out of the current filter');
+
+        $this->get(route('admin.random-texts', ['page' => 1, 'per_page' => 100, 'type' => '']))
+            ->assertViewHas('listState', ['page' => 1, 'per_page' => 100, 'type' => ''])
+            ->assertSee('Moved out of the current filter');
+    }
+
     public function test_honcho_can_edit_and_delete_a_random_text(): void
     {
         $randomText = RandomText::query()->create([
